@@ -1,0 +1,86 @@
+name: Manual Windows x64 Vulkan Artifact
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-libs-windows-x86_64-vulkan:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Install Vulkan SDK
+        shell: pwsh
+        run: |
+          $ver = (Invoke-RestMethod -Uri "https://vulkan.lunarg.com/sdk/latest.json").windows
+          $url = "https://sdk.lunarg.com/sdk/download/$ver/windows/vulkan_sdk.exe"
+          Invoke-WebRequest -Uri $url -OutFile vulkan_sdk.exe
+          Start-Process -FilePath .\vulkan_sdk.exe -ArgumentList "--accept-licenses","--default-answer","--confirm-command","install" -Wait
+          $sdk = "C:\VulkanSDK\$ver"
+          echo "VULKAN_SDK=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          echo "$sdk\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Build (shared libs, Vulkan)
+        shell: cmd
+        run: |
+          for /f "tokens=*" %%i in ('"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath') do set VSINSTALL=%%i
+          call "%VSINSTALL%\VC\Auxiliary\Build\vcvars64.bat"
+          cmake -S . -B build-libs ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DBUILD_SHARED_LIBS=ON ^
+            -DCRISPASR_BUILD_TESTS=OFF ^
+            -DCRISPASR_BUILD_EXAMPLES=OFF ^
+            -DCRISPASR_BUILD_SERVER=OFF ^
+            -DGGML_VULKAN=ON ^
+            -DGGML_CUDA=OFF ^
+            -DGGML_NATIVE=OFF ^
+            -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON ^
+            -DCRISPASR_OPUS_FETCH=ON
+          cmake --build build-libs --config Release -j %NUMBER_OF_PROCESSORS% --target crispasr-lib
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $OUT = "release\libcrispasr-windows-x86_64-vulkan"
+          New-Item -ItemType Directory -Force "$OUT\bin","$OUT\src\Release","$OUT\ggml\src\Release","$OUT\ggml\bin","$OUT\include","$OUT\ggml\include" | Out-Null
+          $BIN_DIRS = @("build-libs\bin\Release","build-libs\bin")
+          foreach ($d in $BIN_DIRS) {
+            if (Test-Path $d) {
+              Get-ChildItem "$d\*.dll" -ErrorAction SilentlyContinue |
+                Copy-Item -Destination "$OUT\bin\"
+              Get-ChildItem "$d\ggml*.dll" -ErrorAction SilentlyContinue |
+                Copy-Item -Destination "$OUT\ggml\bin\"
+            }
+          }
+          $LIB_DIRS = @("build-libs\src\Release","build-libs\src")
+          foreach ($d in $LIB_DIRS) {
+            if (Test-Path $d) {
+              Get-ChildItem "$d\*.lib" -ErrorAction SilentlyContinue |
+                Copy-Item -Destination "$OUT\src\Release\"
+            }
+          }
+          $GGML_LIB_DIRS = @("build-libs\ggml\src\Release","build-libs\ggml\src")
+          foreach ($d in $GGML_LIB_DIRS) {
+            if (Test-Path $d) {
+              Get-ChildItem "$d\*.lib" -ErrorAction SilentlyContinue |
+                Copy-Item -Destination "$OUT\ggml\src\Release\"
+            }
+          }
+          Copy-Item include\crispasr.h "$OUT\include\"
+          Get-ChildItem ggml\include\*.h -ErrorAction SilentlyContinue |
+            Copy-Item -Destination "$OUT\ggml\include\"
+          Copy-Item LICENSE "$OUT\"
+          Copy-Item THIRD_PARTY_NOTICES.txt "$OUT\"
+          cd release
+          tar -czf libcrispasr-windows-x86_64-vulkan.tar.gz libcrispasr-windows-x86_64-vulkan
+          Get-Item libcrispasr-windows-x86_64-vulkan.tar.gz | Format-List Name,Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libcrispasr-windows-x86_64-vulkan
+          path: release/libcrispasr-windows-x86_64-vulkan.tar.gz
