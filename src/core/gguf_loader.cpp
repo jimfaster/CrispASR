@@ -17,6 +17,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <string>
 
 #if defined(_WIN32)
 #include <io.h>
@@ -192,7 +193,18 @@ struct MappedFile {
 #if defined(_WIN32)
         const DWORD page_protect = writable ? PAGE_WRITECOPY : PAGE_READONLY;
         const DWORD view_access = writable ? FILE_MAP_COPY : FILE_MAP_READ;
-        HANDLE hFile = CreateFileA(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        const int wide_length = MultiByteToWideChar(
+            CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, nullptr, 0);
+        if (wide_length == 0)
+            return;
+        std::wstring wide_path((size_t)wide_length, L'\0');
+        if (MultiByteToWideChar(
+                CP_UTF8, MB_ERR_INVALID_CHARS, path, -1,
+                wide_path.data(), wide_length) == 0)
+            return;
+        HANDLE hFile = CreateFileW(
+            wide_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+            OPEN_EXISTING, 0, nullptr);
         if (hFile == INVALID_HANDLE_VALUE)
             return;
         LARGE_INTEGER fsize;
