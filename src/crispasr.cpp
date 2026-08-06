@@ -5600,7 +5600,11 @@ struct whisper_vad_context* whisper_vad_init_with_params(struct whisper_model_lo
     return vctx;
 }
 
-bool whisper_vad_detect_speech(struct whisper_vad_context* vctx, const float* samples, int n_samples) {
+void whisper_vad_reset_state(struct whisper_vad_context* vctx) {
+    ggml_backend_buffer_clear(vctx->buffer, 0);
+}
+
+bool whisper_vad_detect_speech_no_reset(struct whisper_vad_context* vctx, const float* samples, int n_samples) {
     int n_chunks = n_samples / vctx->n_window;
     if (n_samples % vctx->n_window != 0) {
         n_chunks += 1; // Add one more chunk for remaining samples.
@@ -5608,9 +5612,6 @@ bool whisper_vad_detect_speech(struct whisper_vad_context* vctx, const float* sa
 
     CRISPASR_LOG_INFO("%s: detecting speech in %d samples\n", __func__, n_samples);
     CRISPASR_LOG_INFO("%s: n_chunks: %d\n", __func__, n_chunks);
-
-    // Reset LSTM hidden/cell states
-    ggml_backend_buffer_clear(vctx->buffer, 0);
 
     vctx->probs.resize(n_chunks);
     CRISPASR_LOG_INFO("%s: props size: %u\n", __func__, n_chunks);
@@ -5699,6 +5700,11 @@ bool whisper_vad_detect_speech(struct whisper_vad_context* vctx, const float* sa
     ggml_backend_sched_reset(sched);
 
     return true;
+}
+
+bool whisper_vad_detect_speech(struct whisper_vad_context* vctx, const float* samples, int n_samples) {
+    whisper_vad_reset_state(vctx);
+    return whisper_vad_detect_speech_no_reset(vctx, samples, n_samples);
 }
 
 int whisper_vad_segments_n_segments(struct whisper_vad_segments* segments) {
