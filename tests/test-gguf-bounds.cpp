@@ -26,6 +26,13 @@
 #include <string>
 #include <unistd.h> // truncate
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
+
 namespace {
 
 // Write a minimal valid GGUF with one F32 tensor.
@@ -109,3 +116,24 @@ TEST_CASE("core_gguf::load_weights rejects a truncated GGUF without crashing", "
     std::remove(bad.c_str());
     ggml_backend_free(backend);
 }
+
+#if defined(_WIN32)
+TEST_CASE("core_gguf::load_weights accepts a UTF-8 Windows path", "[unit][gguf-path]") {
+    const char* ascii_path = "crispasr_test_gguf_unicode_source.gguf";
+    const char* utf8_path = "crispasr_test_\xC3\xA9_\xE6\xA8\xA1\xE5\x9E\x8B.gguf";
+    const wchar_t* wide_path = L"crispasr_test_\u00E9_\u6A21\u578B.gguf";
+    write_valid_gguf(ascii_path, 64);
+    DeleteFileW(wide_path);
+    REQUIRE(MoveFileW(L"crispasr_test_gguf_unicode_source.gguf", wide_path));
+
+    ggml_backend_t backend = ggml_backend_cpu_init();
+    REQUIRE(backend != nullptr);
+    core_gguf::WeightLoad weights;
+    REQUIRE(core_gguf::load_weights(utf8_path, backend, "test-unicode", weights));
+    REQUIRE(weights.tensors.count("test.weight") == 1);
+
+    core_gguf::free_weights(weights);
+    ggml_backend_free(backend);
+    REQUIRE(DeleteFileW(wide_path));
+}
+#endif
