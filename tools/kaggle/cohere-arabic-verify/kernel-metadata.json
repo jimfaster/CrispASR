@@ -1,5 +1,5 @@
 {
-  "id": "${KAGGLE_ACCOUNT}/cohere-arabic-verify",
+  "id": "chr1str/cohere-arabic-verify",
   "title": "cohere-arabic-verify",
   "code_file": "cohere_arabic_verify.py",
   "language": "python",
@@ -9,8 +9,8 @@
   "enable_internet": "true",
   "competition_sources": [],
   "dataset_sources": [
-    "${KAGGLE_ACCOUNT}/crispasr-hf-token",
-    "${KAGGLE_ACCOUNT}/crispasr-ccache"
+    "chr1str/crispasr-hf-token",
+    "chr1str/crispasr-ccache"
   ],
   "kernel_sources": [],
   "model_sources": []

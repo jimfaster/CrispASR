@@ -154,7 +154,7 @@ def step(name: str, **extra) -> None:
 # capture buffers parent stdout heavily, and the C++ build's
 # subprocess.check_call lets ninja/g++ output flow through that
 # buffered pipe — fine when the build is fast, invisible when slow.
-# Same pattern as ${KAGGLE_ACCOUNT}/qwen3-export (which ran fluently): Popen
+# Same pattern as chr1str/qwen3-export (which ran fluently): Popen
 # the child with stdout=PIPE, iterate line-by-line in Python, print
 # each line with explicit flush. The heartbeat thread runs in
 # parallel and writes step("<label>.heartbeat") every 30 s including
@@ -181,7 +181,7 @@ def sh_with_progress(cmd: str, cwd: Path | None = None) -> None:
     updates _BUILD_PROGRESS as ninja emits lines. Forwards every
     line to the parent stdout (with explicit flush) so Kaggle's
     log capture sees the full build log in near-real-time.
-    Pattern lifted from ${KAGGLE_ACCOUNT}/qwen3-export which uses the same
+    Pattern lifted from chr1str/qwen3-export which uses the same
     Popen+iter approach and runs fluently."""
     print(f"$ {cmd}", flush=True)
     proc = subprocess.Popen(
@@ -288,7 +288,7 @@ def kaggle_secret(name: str, retries: int = 3, backoff_s: float = 5.0) -> str | 
     """Pull a Kaggle secret if available, with verbose diagnostics if
     not. The previous silent fall-back to anonymous made a missing
     secret look identical to a missing-attach-toggle, which burned us
-    on ${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs.
+    on chr1str/crispasr-auto-rebake-refs.
 
     Kaggle injects `KAGGLE_USER_SECRETS_TOKEN` (a JWT) into the runtime
     ONLY when at least one secret is attached to the kernel. So if
@@ -343,10 +343,10 @@ def kaggle_token_from_dataset(filename: str = "hf_token.txt") -> str | None:
     Secrets API entirely — datasets are filesystem-mounted at
     `/kaggle/input/<dataset-slug>/<files>` before the script runs.
 
-    Expected dataset: `${KAGGLE_ACCOUNT}/crispasr-hf-token` (private) containing
+    Expected dataset: `chr1str/crispasr-hf-token` (private) containing
     a single file `hf_token.txt` with the write-scoped HF token.
     Mounted via `tools/kaggle/rebake/kernel-metadata.json:
-    dataset_sources: ["${KAGGLE_ACCOUNT}/crispasr-hf-token"]`.
+    dataset_sources: ["chr1str/crispasr-hf-token"]`.
 
     Note: Kaggle's UI has NO "Add-ons → Variables" option — only
     Secrets, Internet, Accelerator, Data Sources. The previous
@@ -409,7 +409,7 @@ if hf_token:
     print("HF auth: token present (will verify next)", flush=True)
 else:
     print("HF auth: anonymous (rebake+upload will fail without HF_TOKEN). "
-          "Ensure the private Kaggle Dataset ${KAGGLE_ACCOUNT}/crispasr-hf-token is "
+          "Ensure the private Kaggle Dataset chr1str/crispasr-hf-token is "
           "attached to this kernel (kernel-metadata.json:dataset_sources) "
           "AND that the file hf_token.txt in it contains a write-scoped "
           "HuggingFace token. Kaggle's Secrets API is the alternative but "

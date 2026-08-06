@@ -793,7 +793,7 @@ Two test-only deliverables from the same session:
 
 ## 2026-07-12 — §176n / §245 CUDA validation PASS (Kaggle P100/T4)
 
-Ran the two CUDA validation kernels on Kaggle (${KAGGLE_ACCOUNT}). Both reached `COMPLETE`
+Ran the two CUDA validation kernels on Kaggle (chr1s4). Both reached `COMPLETE`
 (the kernels `SystemExit` on failure, so COMPLETE ⇒ verdict PASS):
 - **§176n VoxCPM2** (`crispasr-voxcpm2-176n-cuda`): the default `VOXCPM2_USE_GRAPH`
   GPU path ran on the discrete-GPU mirror path (device-local VRAM), produced a
@@ -2310,7 +2310,7 @@ dynamic fallback for formats no permissive native decoder covers (e.g. AAC).
 
 Generated `tada-ref-{ar,ch,de,es,fr,it,ja,pl,pt}.gguf` from FLEURS CC-BY-4.0
 clips using `HumeAI/tada-codec` language-specific aligners on Kaggle
-(`${KAGGLE_ACCOUNT}/tada-language-voice-reference-ggufs`, kernel v11).  Uploaded to
+(`chr1str/tada-language-voice-reference-ggufs`, kernel v11).  Uploaded to
 `cstr/tada-tts-1b-GGUF` and `cstr/tada-tts-3b-ml-GGUF`.
 
 **How it works at runtime:** `-l fr` causes CrispASR to auto-download
@@ -4169,7 +4169,7 @@ already done (stale PLAN): #93 CMake rename, #94 Go auto-gen LDFLAGS,
 Flipped `VOXCPM2_USE_GRAPH` from opt-in to default-on. Graph path was
 already validated (48.7→14.1s on M1 Metal). Tested on VPS (1.58x faster)
 and Kaggle CPU (1.46-1.61x). Both produce correct ASR roundtrip. Opt-out
-via `VOXCPM2_USE_GRAPH=0`. Kaggle kernel: `${KAGGLE_ACCOUNT}/crispasr-voxcpm2-graph-ab`.
+via `VOXCPM2_USE_GRAPH=0`. Kaggle kernel: `chr1str/crispasr-voxcpm2-graph-ab`.
 
 ### #73 cohere FA long-form benchmark (2026-06-04)
 
@@ -4386,7 +4386,7 @@ tokenizer. `mimo-asr` gets a 420 s timeout (PLAN #115 forces it to CPU,
 yet in the registry and stay excluded; TTS/diarization/LID/aligner
 backends stay excluded (the benchmark measures transcription WER).
 Now 27 backends; triggered on a Kaggle T4
-(`${KAGGLE_ACCOUNT}/crispasr-all-backends-benchmark-t4`).
+(`chr1str/crispasr-all-backends-benchmark-t4`).
 ## 2026-05-29 omniasr-ctc-300m: blank_id fix + CTC auto-chunking + omniasr-300m backend
 
 Three fixes for the OmniASR CTC backend, resolving the empty-output bug
@@ -5231,7 +5231,7 @@ Two more landings this session:
   - Synthesises ~88 s audio by concatenating `samples/jfk.wav` 8×.
   - Runs each backend twice (default `--chunk-overlap 3.0` vs `--chunk-overlap 0`).
   - Parses the SRT outputs, computes char + last-timestamp deltas, prints a verdict (OK / SUSPECTED-BUG / BOTH-FAIL / DEFAULT-FAILS) per backend.
-  Patterns lifted from `tools/kaggle/mimo-asr-cpu-vs-gpu/` (progress.jsonl + HF mirror, sh_with_progress ninja-progress streamer, HF auth via `${KAGGLE_ACCOUNT}/crispasr-hf-token` dataset). User triggers manually via `kaggle kernels push`. Result feeds the next pass of `examples/cli/crispasr_chunk_context_gate.h::kBlocked`.
+  Patterns lifted from `tools/kaggle/mimo-asr-cpu-vs-gpu/` (progress.jsonl + HF mirror, sh_with_progress ninja-progress streamer, HF auth via `chr1str/crispasr-hf-token` dataset). User triggers manually via `kaggle kernels push`. Result feeds the next pass of `examples/cli/crispasr_chunk_context_gate.h::kBlocked`.
 
 **Lesson** for canary P3: "the token is in the vocab" is not the same as "the model supports the language." Multi-language ASR backends with a fixed-size token table that's shared across families need an *explicit* whitelist of what was actually trained on, not a soft check on the embedding lookup. Same trap likely lurks in any future canary-3/-flash variants; the whitelist should be a load-time GGUF KV if upstream NeMo starts publishing the supported set.
 
@@ -5254,7 +5254,7 @@ Distinct bug from PLAN #125 P0 (montvid's Blackwell segfault), same backend. Dis
 
 **Bisect.** Bypassed `git bisect` by inspection — only ~7 commits touched `src/mimo_asr.cpp` since HISTORY §56 shipped the working baseline (`dae361f2`), and `89111260` ("perf #72: load weights to GPU when use_gpu=true") was the standout candidate: it flipped `core_gguf::load_weights(..., ctx->backend_cpu, ...)` to `..., ctx->backend, ...`. The commit message itself anticipated the regression — *"If a platform regresses, add a CRISPASR_FORCE_CPU_WEIGHTS=1 escape hatch — none seen yet"*.
 
-**Verification.** Couldn't safely build + load on the local M1 box (4.5 GB Q4_K + active 90 s overlap-save sweep + ~1 GB free), so pushed the build to Kaggle following the patterns in [[project_kaggle_rebake_fragilities]]. The first attempt (`${KAGGLE_ACCOUNT}/crispasr-mimo-asr-cpu-vs-gpu-bisect-plan-115`) used a GPU kernel and queue-blocked for 14+ hours on exhausted GPU quota. Switched to a CPU notebook (`${KAGGLE_ACCOUNT}/crispasr-mimo-asr-cpu-validate`) — RUNNING immediately, completed in ~8 min, JFK transcript matches HISTORY §56 reference verbatim. Confirms the regression is GPU-path specific.
+**Verification.** Couldn't safely build + load on the local M1 box (4.5 GB Q4_K + active 90 s overlap-save sweep + ~1 GB free), so pushed the build to Kaggle following the patterns in [[project_kaggle_rebake_fragilities]]. The first attempt (`chr1str/crispasr-mimo-asr-cpu-vs-gpu-bisect-plan-115`) used a GPU kernel and queue-blocked for 14+ hours on exhausted GPU quota. Switched to a CPU notebook (`chr1str/crispasr-mimo-asr-cpu-validate`) — RUNNING immediately, completed in ~8 min, JFK transcript matches HISTORY §56 reference verbatim. Confirms the regression is GPU-path specific.
 
 **Independence from PLAN #125 P0 / `a5a518c8` sched hardening.** Verified empirically on M1 Metal after rebuilding on HEAD with the sched-restore patch: same silent-empty symptom. Two different mimo-asr bugs surfacing as the same observable on different platforms (Blackwell sm_120 segfault vs M1 Metal silent-empty).
 
@@ -5298,7 +5298,7 @@ voxtral4b was **not** affected even though it's the same name family — differe
 - `6fef8790` — voxtral opt-out.
 - `e7dfb93f` — qwen3 opt-out (caught by re-running the inconclusive backends on a 90 s clip after the 5 min run was timing out).
 
-**Tooling notes.** First Kaggle kernel attempt for the bisect went wrong because I didn't read the existing `tools/kaggle/crispasr-regression.py` first — it has the `step()` / `progress.jsonl` + HF mirror / `sh_with_progress()` Popen build streamer / `build_heartbeat()` ticker patterns that [[project_kaggle_rebake_fragilities]] documents as the seven fragilities the script defends against. The second kernel (`${KAGGLE_ACCOUNT}/crispasr-mimo-asr-cpu-validate`) applied those patterns end-to-end and ran cleanly.
+**Tooling notes.** First Kaggle kernel attempt for the bisect went wrong because I didn't read the existing `tools/kaggle/crispasr-regression.py` first — it has the `step()` / `progress.jsonl` + HF mirror / `sh_with_progress()` Popen build streamer / `build_heartbeat()` ticker patterns that [[project_kaggle_rebake_fragilities]] documents as the seven fragilities the script defends against. The second kernel (`chr1str/crispasr-mimo-asr-cpu-validate`) applied those patterns end-to-end and ran cleanly.
 
 ---
 
@@ -5406,7 +5406,7 @@ Closing out the handover-prompts/extend-coverage-via-kaggle.md initiative. End-o
 
 ### Kaggle rebake pipeline
 
-The rebake kernel `${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs` had been latently broken since the 2026-05-12 rename of `fixture_path` → `fixture_ref_path` (commit `056493a1`). Nobody noticed for 13 days because the rebake didn't run scheduled in that window. v7 of the kernel triggered today hit four cascading issues before producing any output; each surfaced exactly one fix.
+The rebake kernel `chr1str/crispasr-auto-rebake-refs` had been latently broken since the 2026-05-12 rename of `fixture_path` → `fixture_ref_path` (commit `056493a1`). Nobody noticed for 13 days because the rebake didn't run scheduled in that window. v7 of the kernel triggered today hit four cascading issues before producing any output; each surfaced exactly one fix.
 
 | version | symptom | root cause | fix |
 |---|---|---|---|
@@ -5418,7 +5418,7 @@ The rebake kernel `${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs` had been latentl
 | v12 | HF auth resolved cleanly, but still 0 uploaded; `SystemExit: rebake had failures; refusing to upload` | all-or-nothing upload gate at line 866 blocks every partial run with the 14 known-broken backends | `c11e0648` partial-upload — failed entries never write to `REBAKE_STAGE` so `upload_folder()` only ships successes |
 | v13 | **upload landed** | — | manifest `fixtures.revision` bumped to `b61b03014bc99ecce18ac8f99988d5110c83f2d2` in `e79d1c77` |
 
-Bonus infrastructure: private Kaggle Dataset `${KAGGLE_ACCOUNT}/crispasr-hf-token` created out-of-band as the durable auth-fallback path (Kaggle's UI has no "Add-ons → Variables" option despite older script comments to the contrary — confirmed on the current UI). Mounted via `kernel-metadata.json:dataset_sources`.
+Bonus infrastructure: private Kaggle Dataset `chr1str/crispasr-hf-token` created out-of-band as the durable auth-fallback path (Kaggle's UI has no "Add-ons → Variables" option despite older script comments to the contrary — confirmed on the current UI). Mounted via `kernel-metadata.json:dataset_sources`.
 
 ### Published refs at `cstr/crispasr-regression-fixtures@b61b03014bc`
 
@@ -5471,7 +5471,7 @@ Bonus infrastructure: private Kaggle Dataset `${KAGGLE_ACCOUNT}/crispasr-hf-toke
 - LEARNINGS "Kaggle as a batch-rebake target: seven fragilities the script has to work around" for the deep dive on each fix
 - handover-prompts/extend-coverage-via-kaggle.md for the original initiative scope
 - `tools/kaggle/crispasr-regression.py` is the canonical script (modified across `1b62776e`, `8cf7e931`, `eba52bac`, `0f4de5b9`, `2ff4f1ba`, `c11e0648`)
-- `tools/kaggle/rebake/kernel-metadata.json` now mounts `${KAGGLE_ACCOUNT}/crispasr-hf-token` as the auth fallback
+- `tools/kaggle/rebake/kernel-metadata.json` now mounts `chr1str/crispasr-hf-token` as the auth fallback
 
 ---
 
@@ -15368,7 +15368,7 @@ outputs fixed-Lk=256 attention costs more than the saved rebuilds (dirlk
 slower than dir in 3/3 interleaved reps) → stays opt-in.
 
 **Remaining:**
-- [x] CUDA validation (Kaggle P100, kernel `${KAGGLE_ACCOUNT}/crispasr-qwen3-cp-direct-cuda`,
+- [x] CUDA validation (Kaggle P100, kernel `chr1s4/crispasr-qwen3-cp-direct-cuda`,
       2026-07-11): all four configs rc=0 + **WAV md5-identical** + ASR
       roundtrip verbatim. base 25.4 → direct 22.5 ms/frame (−11%);
       direct+LK_BUCKET 21.4 (fastest on CUDA). **O15=1 no longer crashes on
@@ -15613,7 +15613,7 @@ Key changes:
   conditioning (silence tail + prefix + resample). Frozen ref GGUF on HF.
 - Diff harness dispatch in `crispasr_diff_main.cpp` (transcript-level; stage
   APIs pending).
-- Kaggle kernel v4 (`${KAGGLE_ACCOUNT}/crispasr-kyutai-stt-2-6b-convert`): F16/Q8_0/Q4_K
+- Kaggle kernel v4 (`chr1s4/crispasr-kyutai-stt-2-6b-convert`): F16/Q8_0/Q4_K
   + ref GGUF all uploaded.
 
 **Lesson learned:** Python reference dumpers must apply identical audio
@@ -15718,7 +15718,7 @@ Superseded by **CP_DIRECT** (§232/#245, `src/qwen3_tts.cpp` ~L1912) — sched-f
 
 Verified on M1 Metal 2026-07-12 (`qwen3-tts-12hz-0.6b-base-q8_0.gguf`, quiet box, `QWEN3_TTS_BENCH=1`): `cp_direct active`; per-frame code_pred set≈2-4 ms, compute≈45-60 ms, read≈0.1 ms — dispatch now ~5% (pre-CP_DIRECT sched path was ~25 ms × 15 ≈ 375 ms/frame pure dispatch). ar_loop 76 ms/frame, RTF 1.2×, ASR round-trip correct. code_pred is compute-bound (15 sequential T=1 steps of a 5L/d=1024 transformer) so Option A (unrolled 75-block graph) buys ~nothing. O15_SKIP_REALLOC (Option C) is the broken predecessor.
 
-Load-dependence (§176k): CP_DIRECT comment records "M1 Metal ~equal idle, ~3× under load" — confirmed compute-bound at idle. CUDA RE-VALIDATED PASS 2026-07-12 (Kaggle P100/T4, `${KAGGLE_ACCOUNT}/crispasr-qwen3-cp-direct-cuda` reached COMPLETE = base/o15/direct/direct_lk all rc=0, md5/PCM-equivalent, ASR round-trip intact), on top of prior "11% faster on P100". Re-run after any code_pred change: `kaggle kernels push -p tools/kaggle/qwen3-tts-cp-direct-cuda`.
+Load-dependence (§176k): CP_DIRECT comment records "M1 Metal ~equal idle, ~3× under load" — confirmed compute-bound at idle. CUDA RE-VALIDATED PASS 2026-07-12 (Kaggle P100/T4, `chr1s4/crispasr-qwen3-cp-direct-cuda` reached COMPLETE = base/o15/direct/direct_lk all rc=0, md5/PCM-equivalent, ASR round-trip intact), on top of prior "11% faster on P100". Re-run after any code_pred change: `kaggle kernels push -p tools/kaggle/qwen3-tts-cp-direct-cuda`.
 
 ### Defaults-audit generalisation — LARGELY DONE (2026-07-12)
 
@@ -16023,7 +16023,7 @@ path, NOT speed. Production T3 default stays CPU.
 ### §215b follow-up — tada talker §176b bucket floor (RESOLVED: SHIPPED backend-conditional default, do NOT flip globally)
 Real lever found: the §176b decode bucket floors Lk at 512, wasting ~500 padded/masked attention columns/step on short generations. Implemented opt-in: `kBucketLks` now `{64,128,256,512,1024,2048,4096}`; `tada_pick_bucket` gates eligible floor by `CRISPASR_TADA_BUCKET_MIN` (default 512 = original; small buckets inert). Output-neutral by construction (padding masked to −inf).
 
-Kaggle A/B `${KAGGLE_ACCOUNT}/crispasr-tada-bucket-ab` (P100, 2026-07-11), 3-way (default/floor64/nobucket) × short(17)/long(174 steps), REPS=3, tada-1b q4_k:
+Kaggle A/B `chr1str/crispasr-tada-bucket-ab` (P100, 2026-07-11), 3-way (default/floor64/nobucket) × short(17)/long(174 steps), REPS=3, tada-1b q4_k:
 1. The big Metal win does NOT transfer to CUDA — 266→49 ms (5.4×) is Metal-specific (masked attn over Lk=512 padding cheap on GPU). P100 pos_ss 9.37 vs 6.56 = 1.43×; LOOP-level floor64 just 1.058× (short)/1.016× (long).
 2. Tighter bucket NOT byte-identical on CUDA (IS on Metal, md5 `265b9798…`). P100 md5s diverge with a coherent deterministic signature (short floor64==nobucket≠default; long all-three-differ). Cause: `soft_max_ext` GPU reduction order over Lk=512 vs tight Lk flips a borderline FP bit → different acoustic frame, AR-amplified. Benign FP-reduction diff (default roundtrip ASR 6/6 intelligible), not a logic bug — but "byte-identical AND faster" bar not met on CUDA.
 
@@ -16919,7 +16919,7 @@ neither done nor wanted (launch-bound). Verification (M1, `voxcpm2-q4_k.gguf`, l
 basic synth GPU 5772 ms (AR 4392 + VAE 1005) vs CPU 21647 ms (AR 8987 + VAE 3537) = 3.75×,
 both round-trip via firered-asr; voice-clone (`--voice jfk.wav`) fully on Metal (VAE-encode
 2166 + AR 13069 + VAE-decode 4174), no SIGSEGV/NaN/unsupported op. CUDA validation DONE+PASS
-(Kaggle P100/T4, `tools/kaggle/voxcpm2-176n-cuda/`, `${KAGGLE_ACCOUNT}/crispasr-voxcpm2-176n-cuda`):
+(Kaggle P100/T4, `tools/kaggle/voxcpm2-176n-cuda/`, `chr1s4/crispasr-voxcpm2-176n-cuda`):
 builds on CUDA, CPU vs GPU both round-trip through parakeet (recall ≥0.6), GPU weight-mirror
 confirms not silent CPU fallback, no crash/NaN → discrete-GPU mirror path correct; LEARNING-35
 contiguity risk did not materialize. Re-run after voxcpm2 changes:
@@ -16984,7 +16984,7 @@ audio-conditioned decoder activations. CC0 Common Voice is the clean-license sou
 Metric finding (q3_k): the two signals DIVERGE at aggressive bit-widths — imatrix improved q3_k CER
 0.37→0.13 (6/12 clips) while prefill-logit cosine dipped −0.04; CER is the real gate. imatrix payoff
 grows as bits shrink.
-Fleet run (Kaggle `${KAGGLE_ACCOUNT}/crispasr-imatrix-quant`, CUDA ~105 min): q4_k & q3_k imatrix for 5 ASR-LLM
+Fleet run (Kaggle `chr1str/crispasr-imatrix-quant`, CUDA ~105 min): q4_k & q3_k imatrix for 5 ASR-LLM
 decoders on CC0, A/B CER vs f16, uploaded to each HF repo. Improved CER on 8/10, tied 2/10 (ark-3b),
 0 regressions: qwen3-asr-0.6b q4_k 0.008→0.000 / q3_k 0.664→0.623; mega-asr-1.7b q4_k 0.132→0.010 /
 q3_k 0.389→0.132 (headline); moss-transcribe-2b q4_k 0.150→0.102 / q3_k 0.259→0.170; higgs-stt q4_k

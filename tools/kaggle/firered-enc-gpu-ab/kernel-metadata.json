@@ -1,5 +1,5 @@
 {
-  "id": "${KAGGLE_ACCOUNT}/crispasr-firered-enc-gpu-ab",
+  "id": "chr1str/crispasr-firered-enc-gpu-ab",
   "title": "CrispASR firered enc gpu ab",
   "code_file": "crispasr-firered-enc-gpu-ab.py",
   "language": "python",
@@ -7,7 +7,7 @@
   "is_private": "true",
   "enable_gpu": "true",
   "enable_internet": "true",
-  "dataset_sources": ["${KAGGLE_ACCOUNT}/crispasr-hf-token", "${KAGGLE_ACCOUNT}/crispasr-ccache"],
+  "dataset_sources": ["chr1str/crispasr-hf-token", "chr1str/crispasr-ccache"],
   "competition_sources": [],
   "kernel_sources": [],
   "model_sources": []

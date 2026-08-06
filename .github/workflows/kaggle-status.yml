@@ -64,20 +64,20 @@ jobs:
         id: validate_status
         run: |
           echo "=== validate kernel ==="
-          kaggle kernels status ${KAGGLE_ACCOUNT}/crispasr-regression-suite || \
+          kaggle kernels status chr1str/crispasr-regression-suite || \
             echo "WARNING: could not fetch validate kernel status (first push not done?)"
 
       - name: Check rebake kernel status
         id: rebake_status
         run: |
           echo "=== rebake kernel ==="
-          kaggle kernels status ${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs || \
+          kaggle kernels status chr1str/crispasr-auto-rebake-refs || \
             echo "WARNING: could not fetch rebake kernel status (first push not done?)"
 
       - name: Verify URLs (no auth needed)
         run: |
-          echo "Validate kernel: https://www.kaggle.com/code/${KAGGLE_ACCOUNT}/crispasr-regression-suite"
-          echo "Rebake kernel:   https://www.kaggle.com/code/${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs"
+          echo "Validate kernel: https://www.kaggle.com/code/chr1str/crispasr-regression-suite"
+          echo "Rebake kernel:   https://www.kaggle.com/code/chr1str/crispasr-auto-rebake-refs"
           echo
           echo "To verify the schedule is active, open each URL and check"
           echo "Settings → 'Schedule a notebook run'. Expected:"
@@ -92,7 +92,7 @@ jobs:
         run: |
           echo "Pushing validate kernel bootstrap..."
           kaggle kernels push -p tools/kaggle
-          echo "Done. Watch at: https://www.kaggle.com/code/${KAGGLE_ACCOUNT}/crispasr-regression-suite"
+          echo "Done. Watch at: https://www.kaggle.com/code/chr1str/crispasr-regression-suite"
           echo
           echo "NOTE: re-push is only needed when crispasr-regression.py itself"
           echo "changes (new pip deps, new env knobs). Pure C++ / manifest changes"

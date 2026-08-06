@@ -778,6 +778,13 @@ CRISPASR_API struct whisper_vad_context* whisper_vad_init_with_params(struct whi
 
 CRISPASR_API bool whisper_vad_detect_speech(struct whisper_vad_context* vctx, const float* samples, int n_samples);
 
+// Streaming variant: preserve the Silero LSTM state across calls.
+// Call whisper_vad_reset_state() at the recording-session boundary.
+CRISPASR_API bool whisper_vad_detect_speech_no_reset(struct whisper_vad_context* vctx, const float* samples,
+                                                      int n_samples);
+
+CRISPASR_API void whisper_vad_reset_state(struct whisper_vad_context* vctx);
+
 CRISPASR_API int whisper_vad_n_probs(struct whisper_vad_context* vctx);
 CRISPASR_API float* whisper_vad_probs(struct whisper_vad_context* vctx);
 

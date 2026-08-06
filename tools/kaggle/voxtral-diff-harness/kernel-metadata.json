@@ -1,5 +1,5 @@
 {
-  "id": "${KAGGLE_ACCOUNT}/crispasr-voxtral-tts-diff-harness",
+  "id": "chr1str/crispasr-voxtral-tts-diff-harness",
   "title": "crispasr-voxtral-tts-diff-harness",
   "code_file": "crispasr-voxtral-diff.py",
   "language": "python",
@@ -8,8 +8,8 @@
   "enable_gpu": "true",
   "enable_internet": "true",
   "dataset_sources": [
-    "${KAGGLE_ACCOUNT}/crispasr-hf-token",
-    "${KAGGLE_ACCOUNT}/crispasr-ccache"
+    "chr1str/crispasr-hf-token",
+    "chr1str/crispasr-ccache"
   ],
   "competition_sources": [],
   "kernel_sources": [],

@@ -1,5 +1,5 @@
 {
-  "id": "${KAGGLE_ACCOUNT}/crispasr-cv3-vulkan-convtest-304",
+  "id": "chr1str/crispasr-cv3-vulkan-convtest-304",
   "title": "CrispASR CV3 Vulkan ConvTest 304",
   "code_file": "cv3_vulkan_convtest.py",
   "language": "python",
@@ -8,7 +8,7 @@
   "enable_gpu": "true",
   "enable_internet": "true",
   "competition_sources": [],
-  "dataset_sources": ["${KAGGLE_ACCOUNT}/crispasr-hf-token", "${KAGGLE_ACCOUNT}/crispasr-ccache"],
+  "dataset_sources": ["chr1str/crispasr-hf-token", "chr1str/crispasr-ccache"],
   "kernel_sources": [],
   "model_sources": []
 }

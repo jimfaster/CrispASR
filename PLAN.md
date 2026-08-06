@@ -251,12 +251,12 @@ spectrum appears to have.
     6.88% DER.
   * Harness: tools/diarize_eval.py, --split tune so holdout is not computed
     at all.
-  * Venue: Kaggle, ${KAGGLE_ACCOUNT}/crispasr-diarize-count-eval. The local box sat
+  * Venue: Kaggle, chr1str/crispasr-diarize-count-eval. The local box sat
     between load 13 and 197 for the whole session and killed the sweep three
     times; the kernel pulls the HF parquet directly so there is no 20 GB
     dataset upload.
 
-RESULT (Kaggle ${KAGGLE_ACCOUNT}/crispasr-diarize-count-eval v4, 40-file tune subset,
+RESULT (Kaggle chr1str/crispasr-diarize-count-eval v4, 40-file tune subset,
 --diarize-max-speakers 8):
 
                     count exact   within1   under   over     DER
@@ -1605,7 +1605,7 @@ TODO (open):
   timeout (≥240 s) and re-run to settle pass-vs-stuck; passes on M1 Metal locally.
 - [ ] **orpheus** (TTS) — fixed §215 (Metal + CPU bucket both ASR-roundtrip verbatim on M1), stays
   opt-in `CRISPASR_ORPHEUS_BUCKET=1` (~30% slower on M1 unified memory, may win on CUDA).
-  **CUDA cross-check still pending** (Kaggle `${KAGGLE_ACCOUNT}/crispasr-orpheus-talker-cuda` end-to-end
+  **CUDA cross-check still pending** (Kaggle `chr1str/crispasr-orpheus-talker-cuda` end-to-end
   `orpheus_synthesize`).
 - [ ] **chatterbox** (TTS) — 0-byte (~14 s) with `--voice <wav> --i-have-rights`; the #83 S3Gen GPU
   fix was Metal-validated — re-check the CUDA S3Gen path.

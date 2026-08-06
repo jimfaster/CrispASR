@@ -1896,8 +1896,8 @@ Two traps cost a couple of cold ~25 min CUDA builds before they were caught:
 1. **Datasets can't be cross-used between accounts.** A kernel only attaches
    datasets owned by the account it runs under — Kaggle silently drops a
    cross-account `dataset_sources` entry (*"not valid dataset sources"*) and
-   pushes the kernel **without** it. So `${KAGGLE_ACCOUNT}/crispasr-ccache` cannot attach to
-   a `${KAGGLE_ACCOUNT}` kernel. The fix is a per-account **copy** of every dataset (both
+   pushes the kernel **without** it. So `chr1s4/crispasr-ccache` cannot attach to
+   a `chr1str` kernel. The fix is a per-account **copy** of every dataset (both
    accounts already keep their own `crispasr-hf-token`); make `crispasr-ccache`
    exist under both too. (Don't switch the kernel's account to chase a dataset.)
 
@@ -10535,7 +10535,7 @@ Confirm with `sample $PID 1`: macOS will show what the call stack is parked on. 
 
 ## Kaggle as a batch-rebake target: seven fragilities the script has to work around (2026-05-25)
 
-Bringing up the multi-backend rebake on `${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs` took 7 sequential surgical fixes across one afternoon, each surfacing a different Kaggle-side or script-side fragility. Six of the seven would NOT have been visible without running the kernel end-to-end — they're masked by partial successes in smaller notebooks (fusion-ab, qwen3-export). Capturing them here so the next person bringing up a Kaggle batch job over `manifest.json`-driven backends doesn't rediscover them one at a time.
+Bringing up the multi-backend rebake on `chr1str/crispasr-auto-rebake-refs` took 7 sequential surgical fixes across one afternoon, each surfacing a different Kaggle-side or script-side fragility. Six of the seven would NOT have been visible without running the kernel end-to-end — they're masked by partial successes in smaller notebooks (fusion-ab, qwen3-export). Capturing them here so the next person bringing up a Kaggle batch job over `manifest.json`-driven backends doesn't rediscover them one at a time.
 
 ### 1. `kaggle kernels output|files|logs` returns nothing mid-run
 
@@ -10548,7 +10548,7 @@ Don't rely on `kaggle kernels output` for in-flight diagnostics. It's a *post-mo
 
 ### 2. `subprocess.check_call` on cmake/ninja produces invisible-progress builds
 
-Child stdout flows through the parent's Python stdout, which gets line-buffered (Python) → block-buffered (Kaggle's papermill log capture). A healthy build at 200 / 360 objects can sit silent in the UI for 90+ minutes between heartbeats while ninja is just chewing through templates. `${KAGGLE_ACCOUNT}/qwen3-export` solved this with a Popen + line-reader:
+Child stdout flows through the parent's Python stdout, which gets line-buffered (Python) → block-buffered (Kaggle's papermill log capture). A healthy build at 200 / 360 objects can sit silent in the UI for 90+ minutes between heartbeats while ninja is just chewing through templates. `chr1str/qwen3-export` solved this with a Popen + line-reader:
 
 ```python
 proc = subprocess.Popen(cmd, shell=True, bufsize=1, text=True,
@@ -10626,8 +10626,8 @@ The cleanest end-to-end shape is: rebake → upload immediately from the same Py
 
 - HISTORY 2026-05-25 (latest) "Kaggle rebake pipeline wired end-to-end" for the chronological summary
 - `tools/kaggle/crispasr-regression.py` commits `1b62776e` (heartbeat) → `8cf7e931` (KeyError fix + sort) → `eba52bac` (Popen streamer) → `0f4de5b9` (cache cleanup) → `2ff4f1ba` (Dataset auth) → `c11e0648` (partial upload)
-- `${KAGGLE_ACCOUNT}/qwen3-export` Kaggle notebook for the canonical Popen+iter pattern that the fix lifts
-- The private Kaggle Dataset `${KAGGLE_ACCOUNT}/crispasr-hf-token` is the auth-fallback infrastructure
+- `chr1str/qwen3-export` Kaggle notebook for the canonical Popen+iter pattern that the fix lifts
+- The private Kaggle Dataset `chr1str/crispasr-hf-token` is the auth-fallback infrastructure
 
 ---
 

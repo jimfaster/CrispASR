@@ -13,14 +13,14 @@ maintenance is bumping pinned revisions in `tests/regression/manifest.json`.
 tools/kaggle/
 ├── README.md                   This file.
 ├── kernel-metadata.json        Kaggle manifest for the VALIDATE kernel
-│                               (id = ${KAGGLE_ACCOUNT}/crispasr-regression-suite,
+│                               (id = chr1str/crispasr-regression-suite,
 │                                code_file = crispasr-regression.py).
 ├── crispasr-regression.py      THE notebook script. Clones the repo,
 │                               builds CrispASR, runs the regression
 │                               suite. Same file powers both kernels.
 ├── push.sh                     `kaggle kernels push` for the validate kernel.
 └── rebake/                     Sibling kernel for AUTO re-bake.
-    ├── kernel-metadata.json    id = ${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs,
+    ├── kernel-metadata.json    id = chr1str/crispasr-auto-rebake-refs,
     │                           code_file = crispasr-rebake.py.
     ├── crispasr-rebake.py      Thin bootstrap: sets MODE=rebake +
     │                           UPLOAD=1, clones `main`, exec's the
@@ -66,7 +66,7 @@ The CLI prefers the modern access token when both files exist.
    `https://www.kaggle.com/code/<your-kaggle-username>/crispasr-regression-suite`.
    The slug `<username>` comes from the `id` field in
    `kernel-metadata.json` — edit that to your username before the
-   first push if you're not `${KAGGLE_ACCOUNT}`.
+   first push if you're not `chr1str`.
 
 2. **Wait for the first run to complete cleanly** (poll the URL or
    `kaggle kernels status <id>`). The first run downloads ~1 GB
@@ -84,10 +84,10 @@ The CLI prefers the modern access token when both files exist.
 4. **Enable the schedule** (the manual step the CLI can't do —
    Kaggle hasn't exposed scheduling via API):
    - Validate kernel
-     ([${KAGGLE_ACCOUNT}/crispasr-regression-suite](https://www.kaggle.com/code/${KAGGLE_ACCOUNT}/crispasr-regression-suite)):
+     ([chr1str/crispasr-regression-suite](https://www.kaggle.com/code/chr1str/crispasr-regression-suite)):
      Settings → "Schedule a notebook run" → Weekly · Sun · 04:00 UTC.
    - Rebake kernel
-     ([${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs](https://www.kaggle.com/code/${KAGGLE_ACCOUNT}/crispasr-auto-rebake-refs)):
+     ([chr1str/crispasr-auto-rebake-refs](https://www.kaggle.com/code/chr1str/crispasr-auto-rebake-refs)):
      Settings → "Schedule a notebook run" → Monthly · 1st · 04:00 UTC.
      Less often than validate because re-baking is intentional drift
      adoption, not routine checking. The fixtures HF repo gets new

@@ -1,5 +1,5 @@
 {
-  "id": "${KAGGLE_ACCOUNT}/crispasr-parakeet-mem-policy-cuda",
+  "id": "chr1str/crispasr-parakeet-mem-policy-cuda",
   "title": "crispasr-parakeet-mem-policy-cuda",
   "code_file": "crispasr-parakeet-mem-policy-cuda.py",
   "language": "python",
@@ -8,8 +8,8 @@
   "enable_gpu": "true",
   "enable_internet": "true",
   "dataset_sources": [
-    "${KAGGLE_ACCOUNT}/crispasr-hf-token",
-    "${KAGGLE_ACCOUNT}/crispasr-ccache"
+    "chr1str/crispasr-hf-token",
+    "chr1str/crispasr-ccache"
   ],
   "competition_sources": [],
   "kernel_sources": [],

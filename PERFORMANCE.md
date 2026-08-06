@@ -204,7 +204,7 @@ the §232 campaign. Verified against current code, not carried from this doc.
 - **Batched TDT/RNNT decode (`CRISPASR_TDT_BATCH` / `CRISPASR_RNNT_BATCH`,
   default OFF) is a MEASURED CPU LOSS for parakeet TDT — keep it OFF, do NOT
   flip.** The "370 sgemv → 26 sgemm" framing predicted a CPU win; the #81 A/B on
-  a clean Kaggle CPU (P100 box, `${KAGGLE_ACCOUNT}/crispasr-issue81-onnx-bench`,
+  a clean Kaggle CPU (P100 box, `chr1str/crispasr-issue81-onnx-bench`,
   2026-07-18) measured the opposite on parakeet-tdt-0.6b, transcript
   byte-identical in both arms:
 
@@ -362,7 +362,7 @@ Do **not** re-enable encoder-graph caching (#235 UAF + measured dud), and do
 ## Kaggle GPU — full backend sweep — 2026-06-20
 
 Platform: Kaggle GPU worker (CUDA), `tools/kaggle-benchmark-all-backends.py`
-(kernel `${KAGGLE_ACCOUNT}/crispasr-full-backend-sweep`). Commit: latest `main`. **First
+(kernel `chr1s4/crispasr-full-backend-sweep`). Commit: latest `main`. **First
 full-coverage sweep** — every ASR + TTS backend plus the two text-MT backends,
 59 entries — with **per-backend results streamed live to an HF dataset**
 (`cstr/crispasr-kaggle-progress/full-backend-sweep/latest/`, resumable). Audio:
@@ -421,7 +421,7 @@ m2m100 (3.7 s), madlad (12.5 s) — en→de translation produced output.
 
 - **Streaming + resume validated end-to-end.** All per-backend JSONs landed in the
   HF dataset as each backend finished; a re-push skips already-streamed backends.
-  Root cause of the earlier streaming failures (token unresolved on the ${KAGGLE_ACCOUNT}
+  Root cause of the earlier streaming failures (token unresolved on the chr1s4
   nested mount path) fixed in `81826457`.
 - **Genuine CUDA failures: ~7** (was reported as 10), of which `fastpitch` +
   `speecht5` (§204), `chatterbox` (§205), `lfm2-audio` (§206), and `kugelaudio` (§209) are now FIXED; `orpheus` and `cosyvoice3` (dies 0.1 s) remain — tracked

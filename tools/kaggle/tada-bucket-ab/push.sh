@@ -16,5 +16,5 @@ echo "Pushing $(jq -r .id kernel-metadata.json) ..."
 kaggle kernels push -p "$dir"
 echo
 echo "Triggered. Monitor with:"
-echo "  kaggle kernels status ${KAGGLE_ACCOUNT}/crispasr-tada-bucket-ab"
-echo "  kaggle kernels output ${KAGGLE_ACCOUNT}/crispasr-tada-bucket-ab -p ./out"
+echo "  kaggle kernels status chr1str/crispasr-tada-bucket-ab"
+echo "  kaggle kernels output chr1str/crispasr-tada-bucket-ab -p ./out"
