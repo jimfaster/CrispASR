@@ -5602,6 +5602,7 @@ struct whisper_vad_context* whisper_vad_init_with_params(struct whisper_model_lo
 
 void whisper_vad_reset_state(struct whisper_vad_context* vctx) {
     ggml_backend_buffer_clear(vctx->buffer, 0);
+    vctx->probs.clear();
 }
 
 bool whisper_vad_detect_speech_no_reset(struct whisper_vad_context* vctx, const float* samples, int n_samples) {
