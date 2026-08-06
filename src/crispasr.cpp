@@ -5685,7 +5685,7 @@ bool whisper_vad_detect_speech_no_reset(struct whisper_vad_context* vctx, const 
         // Direct graph compute — no scheduler, no threadpool churn.
         if (ggml_graph_compute(gf, &cplan) != GGML_STATUS_SUCCESS) {
             CRISPASR_LOG_ERROR("%s: failed to compute VAD graph\n", __func__);
-            break;
+            return false;
         }
 
         // Get the probability for this chunk.
