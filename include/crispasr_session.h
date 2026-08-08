@@ -53,6 +53,10 @@ struct parakeet_context;
 typedef struct parakeet_context parakeet_context;
 struct parakeet_result;
 typedef struct parakeet_result parakeet_result;
+struct cohere_context;
+typedef struct cohere_context cohere_context;
+struct cohere_result;
+typedef struct cohere_result cohere_result;
 typedef bool (*crispasr_abort_callback)(void* user_data);
 struct whisper_context;
 typedef struct whisper_context whisper_context;
@@ -222,6 +226,14 @@ CRISPASR_SESSION_API int64_t crispasr_parakeet_result_token_t0(parakeet_result* 
 CRISPASR_SESSION_API int64_t crispasr_parakeet_result_token_t1(parakeet_result* r, int i);
 CRISPASR_SESSION_API float crispasr_parakeet_result_token_p(parakeet_result* r, int i);
 CRISPASR_SESSION_API void crispasr_parakeet_result_free(parakeet_result* r);
+CRISPASR_SESSION_API cohere_context* crispasr_cohere_init(const char* model_path, int n_threads, int use_flash);
+CRISPASR_SESSION_API void crispasr_cohere_free(cohere_context* ctx);
+CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_abort(
+    cohere_context* ctx, const float* pcm, int n_samples, const char* language,
+    crispasr_abort_callback abort_callback, void* abort_callback_user_data);
+CRISPASR_SESSION_API const char* crispasr_cohere_backend_name(cohere_context* ctx);
+CRISPASR_SESSION_API const char* crispasr_cohere_result_text(cohere_result* r);
+CRISPASR_SESSION_API void crispasr_cohere_result_free(cohere_result* r);
 // Issue #214: set the preferred GPU backend name ("cuda", "vulkan",
 // "metal"). Call before any crispasr_session_open*. NULL or "" = auto.
 CRISPASR_SESSION_API void crispasr_set_gpu_backend(const char* name);
