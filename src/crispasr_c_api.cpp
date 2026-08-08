@@ -1376,6 +1376,48 @@ CA_EXPORT void crispasr_parakeet_result_free(parakeet_result* r) {
 
 #endif // CA_HAVE_PARAKEET
 
+#ifdef CA_HAVE_COHERE
+
+CA_EXPORT cohere_context* crispasr_cohere_init(const char* model_path, int n_threads, int use_flash) {
+    if (!model_path)
+        return nullptr;
+    cohere_context_params p = cohere_context_default_params();
+    p.n_threads = n_threads > 0 ? n_threads : 4;
+    p.use_flash = use_flash != 0;
+    p.verbosity = 0;
+    return cohere_init_from_file(model_path, p);
+}
+
+CA_EXPORT void crispasr_cohere_free(cohere_context* ctx) {
+    if (ctx)
+        cohere_free(ctx);
+}
+
+CA_EXPORT cohere_result* crispasr_cohere_transcribe_with_abort(
+    cohere_context* ctx, const float* pcm, int n_samples, const char* language,
+    crispasr_abort_callback abort_callback, void* abort_callback_user_data) {
+    if (!ctx || !pcm || n_samples <= 0 || !language || !language[0])
+        return nullptr;
+    cohere_set_abort_callback(ctx, abort_callback, abort_callback_user_data);
+    cohere_result* result = cohere_transcribe_ex(ctx, pcm, n_samples, language, 0);
+    cohere_set_abort_callback(ctx, nullptr, nullptr);
+    return result;
+}
+
+CA_EXPORT const char* crispasr_cohere_backend_name(cohere_context* ctx) {
+    return cohere_backend_name(ctx);
+}
+
+CA_EXPORT const char* crispasr_cohere_result_text(cohere_result* r) {
+    return (r && r->text) ? r->text : "";
+}
+
+CA_EXPORT void crispasr_cohere_result_free(cohere_result* r) {
+    cohere_result_free(r);
+}
+
+#endif // CA_HAVE_COHERE
+
 #ifdef CA_HAVE_NEMOTRON
 
 // Forward decl — the lazy dynamic-plugin loader is defined further down (next

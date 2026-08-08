@@ -9,6 +9,7 @@ extern "C" {
 #endif
 
 struct cohere_context;
+typedef bool (*cohere_abort_callback)(void* user_data);
 
 struct cohere_context_params {
     int n_threads;       // default: number of physical cores
@@ -30,6 +31,8 @@ struct cohere_context_params cohere_context_default_params(void);
 struct cohere_context* cohere_init_from_file(const char* path_model, struct cohere_context_params params);
 
 void cohere_free(struct cohere_context* ctx);
+void cohere_set_abort_callback(struct cohere_context* ctx, cohere_abort_callback callback, void* user_data);
+const char* cohere_backend_name(struct cohere_context* ctx);
 
 // Transcribe raw 16 kHz mono PCM.
 // Returns a newly allocated UTF-8 string (caller must free()).

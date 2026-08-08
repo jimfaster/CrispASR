@@ -329,19 +329,36 @@ static void cohere_prof_print(const cohere_prof_state& ps) {
 // Like crispasr's ggml_graph_compute_helper: set n_threads on every backend
 // in the scheduler (via registry proc address) before each compute call.
 // This ensures the thread count is applied correctly even after sched resets.
-static bool cohere_sched_graph_compute(ggml_backend_sched_t sched, struct ggml_cgraph* gf, int n_threads) {
+static bool cohere_sched_graph_compute(ggml_backend_sched_t sched, struct ggml_cgraph* gf, int n_threads,
+                                       cohere_abort_callback abort_callback, void* abort_callback_user_data) {
     for (int i = 0; i < ggml_backend_sched_get_n_backends(sched); i++) {
         ggml_backend_t backend = ggml_backend_sched_get_backend(sched, i);
         ggml_backend_dev_t dev = ggml_backend_get_device(backend);
         ggml_backend_reg_t reg = dev ? ggml_backend_dev_backend_reg(dev) : nullptr;
         if (reg) {
-            auto* fn =
+            auto* set_threads =
                 (ggml_backend_set_n_threads_t)ggml_backend_reg_get_proc_address(reg, "ggml_backend_set_n_threads");
-            if (fn)
-                fn(backend, n_threads);
+            if (set_threads)
+                set_threads(backend, n_threads);
+            auto* set_abort = (ggml_backend_set_abort_callback_t)ggml_backend_reg_get_proc_address(
+                reg, "ggml_backend_set_abort_callback");
+            if (set_abort)
+                set_abort(backend, abort_callback, abort_callback_user_data);
         }
     }
-    return ggml_backend_sched_graph_compute(sched, gf) == GGML_STATUS_SUCCESS;
+    const ggml_status status = ggml_backend_sched_graph_compute(sched, gf);
+    for (int i = 0; i < ggml_backend_sched_get_n_backends(sched); i++) {
+        ggml_backend_t backend = ggml_backend_sched_get_backend(sched, i);
+        ggml_backend_dev_t dev = ggml_backend_get_device(backend);
+        ggml_backend_reg_t reg = dev ? ggml_backend_dev_backend_reg(dev) : nullptr;
+        if (reg) {
+            auto* set_abort = (ggml_backend_set_abort_callback_t)ggml_backend_reg_get_proc_address(
+                reg, "ggml_backend_set_abort_callback");
+            if (set_abort)
+                set_abort(backend, nullptr, nullptr);
+        }
+    }
+    return status == GGML_STATUS_SUCCESS;
 }
 
 // ---------------------------------------------------------------------------
@@ -562,7 +579,14 @@ struct cohere_context {
 
     // §90 beam-search width. 1 = greedy (default).
     int beam_size = 1;
+
+    cohere_abort_callback abort_callback = nullptr;
+    void* abort_callback_user_data = nullptr;
 };
+
+static bool cohere_should_abort(cohere_context* ctx) {
+    return ctx->abort_callback && ctx->abort_callback(ctx->abort_callback_user_data);
+}
 
 static void cohere_log_tensor(const char* name, const struct ggml_tensor* t);
 static struct ggml_cgraph* cohere_build_graph_encoder(struct cohere_context* ctx, int T_mel);
@@ -1761,6 +1785,8 @@ static struct ggml_cgraph* cohere_build_graph_decoder(struct cohere_context* ctx
 
 static std::vector<float> cohere_decode_step(struct cohere_context* ctx, int T_enc, const int* tokens, int n_tok,
                                              int offset) {
+    if (cohere_should_abort(ctx))
+        return {};
     const auto& hp = ctx->model.hparams;
     const int vocab_size = hp.vocab_size;
     auto& perf = ctx->perf;
@@ -1813,10 +1839,14 @@ static std::vector<float> cohere_decode_step(struct cohere_context* ctx, int T_e
     }
 
     t0 = ggml_time_us();
-    if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf, ctx->params.n_threads)) {
-        fprintf(stderr, "cohere: failed to compute decoder graph\n");
+    if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf, ctx->params.n_threads, ctx->abort_callback,
+                                    ctx->abort_callback_user_data)) {
+        if (!cohere_should_abort(ctx))
+            fprintf(stderr, "cohere: failed to compute decoder graph\n");
         return {};
     }
+    if (cohere_should_abort(ctx))
+        return {};
     t1 = ggml_time_us();
     {
         int64_t dt = t1 - t0;
@@ -2064,6 +2094,17 @@ void cohere_free(struct cohere_context* ctx) {
     delete ctx;
 }
 
+void cohere_set_abort_callback(struct cohere_context* ctx, cohere_abort_callback callback, void* user_data) {
+    if (ctx) {
+        ctx->abort_callback = callback;
+        ctx->abort_callback_user_data = user_data;
+    }
+}
+
+const char* cohere_backend_name(struct cohere_context* ctx) {
+    return ctx && ctx->ggml_backend ? ggml_backend_name(ctx->ggml_backend) : nullptr;
+}
+
 int cohere_n_vocab(struct cohere_context* ctx) {
     return ctx->vocab.n_vocab();
 }
@@ -2153,6 +2194,8 @@ static void cohere_fold_batchnorm(cohere_model& model, int verbosity) {
 
 struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const float* samples, int n_samples,
                                            const char* lang, int64_t t_offset_cs) {
+    if (!ctx || !samples || n_samples <= 0 || cohere_should_abort(ctx))
+        return nullptr;
     const auto& hp = ctx->model.hparams;
     const auto& voc = ctx->vocab;
     const int n_heads = hp.dec_n_heads;
@@ -2234,6 +2277,10 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
             }
 
             for (size_t chunk_idx = 0; chunk_idx < chunks.size(); ++chunk_idx) {
+                if (cohere_should_abort(ctx)) {
+                    cohere_result_free(full);
+                    return nullptr;
+                }
                 const int offset = (int)chunks[chunk_idx].first;
                 const int chunk_end = (int)chunks[chunk_idx].second;
                 int64_t chunk_t0_cs = t_offset_cs + (int64_t)((double)offset / hp.sample_rate * 100.0);
@@ -2242,6 +2289,11 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
                             (double)(chunk_end - offset) / hp.sample_rate);
                 cohere_result* chunk_r =
                     cohere_transcribe_ex(ctx, samples + offset, chunk_end - offset, lang, chunk_t0_cs);
+                if (cohere_should_abort(ctx)) {
+                    cohere_result_free(chunk_r);
+                    cohere_result_free(full);
+                    return nullptr;
+                }
                 if (!merge_results(full, chunk_r)) {
                     cohere_result_free(full);
                     return nullptr;
@@ -2285,6 +2337,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
         cohere_bench_stage _b_enc("encoder (all chunks)");
         int n_chunks = 0;
         for (int sample_offset = 0; sample_offset < n_samples; sample_offset += CHUNK_SAMPLES) {
+            if (cohere_should_abort(ctx))
+                return nullptr;
             int chunk_n = std::min(CHUNK_SAMPLES, n_samples - sample_offset);
             n_chunks++;
 
@@ -2367,10 +2421,14 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
 
             // Compute
             t0 = ggml_time_us();
-            if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf_enc, ctx->params.n_threads)) {
-                fprintf(stderr, "cohere: failed to compute encoder graph (chunk %d)\n", n_chunks);
+            if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf_enc, ctx->params.n_threads, ctx->abort_callback,
+                                            ctx->abort_callback_user_data)) {
+                if (!cohere_should_abort(ctx))
+                    fprintf(stderr, "cohere: failed to compute encoder graph (chunk %d)\n", n_chunks);
                 return nullptr;
             }
+            if (cohere_should_abort(ctx))
+                return nullptr;
             t1 = ggml_time_us();
             perf.t_enc_compute_us += (t1 - t0);
 
@@ -2661,6 +2719,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
 
     // Prompt pass
     auto logits = cohere_decode_step(ctx, T_enc, prompt.data(), (int)prompt.size(), 0);
+    if (logits.empty())
+        return nullptr;
     perf.n_dec_steps++;
     int offset = (int)prompt.size();
     COHERE_VLOG2(vb, "cohere: prompt pass done      nodes=%d  build=%.1f alloc=%.1f compute=%.1f ms\n",
@@ -2722,6 +2782,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
 
         auto br = core_beam_decode::run_with_probs_branched(ctx, last_logits, save_fn, restore_fn, snap_free_fn,
                                                             step_fn, bcfg);
+        if (cohere_should_abort(ctx))
+            return nullptr;
 
         // Strip EOS if present at the end
         for (int i = 0; i < (int)br.tokens.size(); i++) {
@@ -2738,6 +2800,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
         std::vector<float> adjusted_logits;
 
         for (int step = 0; step < max_gen; step++) {
+            if (cohere_should_abort(ctx))
+                return nullptr;
             const int vocab = hp.vocab_size;
             const float* last_logits = (step == 0) ? logits.data() + ((int)prompt.size() - 1) * vocab : logits.data();
             const float* pick_logits = last_logits;
@@ -2816,6 +2880,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
             offset++;
 
             logits = cohere_decode_step(ctx, T_enc, &next_tok, 1, offset - 1);
+            if (logits.empty())
+                return nullptr;
             perf.n_dec_steps++;
         }
     } // end else (greedy path)
@@ -3296,7 +3362,7 @@ float* cohere_run_encoder(struct cohere_context* ctx, const float* mel, int n_me
         return nullptr;
     ggml_backend_tensor_set(pos_enc_t, pos_enc.data(), 0, pos_enc.size() * sizeof(float));
 
-    if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf_enc, ctx->params.n_threads)) {
+    if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf_enc, ctx->params.n_threads, nullptr, nullptr)) {
         fprintf(stderr, "cohere: failed to compute encoder graph\n");
         return nullptr;
     }
@@ -3360,7 +3426,7 @@ int cohere_run_encoder_staged(struct cohere_context* ctx, const float* mel, int 
         return -1;
     ggml_backend_tensor_set(pos_enc_t, pos_enc.data(), 0, pos_enc.size() * sizeof(float));
 
-    if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf, ctx->params.n_threads)) {
+    if (!cohere_sched_graph_compute(ctx->ggml_alloc, gf, ctx->params.n_threads, nullptr, nullptr)) {
         fprintf(stderr, "cohere: staged encoder compute failed\n");
         return -1;
     }
