@@ -246,6 +246,8 @@ struct parakeet_context {
     parakeet_joint_weights joint_w;
 
     int n_threads = 4;
+    parakeet_abort_callback abort_callback = nullptr;
+    void* abort_callback_user_data = nullptr;
 
     // CTC decode mode. When true and the model has a CTC head, use CTC
     // greedy decode instead of TDT. CTC is frame-synchronous and doesn't
@@ -273,6 +275,30 @@ struct parakeet_context {
     std::vector<uint8_t> cached_enc_meta;
     int cached_enc_T_mel = 0;
 };
+
+static bool parakeet_should_abort(parakeet_context* ctx) {
+    return ctx->abort_callback && ctx->abort_callback(ctx->abort_callback_user_data);
+}
+
+static void parakeet_set_backend_abort_callback(parakeet_context* ctx, parakeet_abort_callback callback,
+                                                void* user_data) {
+    for (int i = 0; i < ggml_backend_sched_get_n_backends(ctx->sched); ++i) {
+        ggml_backend_t backend = ggml_backend_sched_get_backend(ctx->sched, i);
+        ggml_backend_dev_t device = ggml_backend_get_device(backend);
+        ggml_backend_reg_t registry = device ? ggml_backend_dev_backend_reg(device) : nullptr;
+        auto* set_abort = (ggml_backend_set_abort_callback_t)ggml_backend_reg_get_proc_address(
+            registry, "ggml_backend_set_abort_callback");
+        if (set_abort)
+            set_abort(backend, callback, user_data);
+    }
+}
+
+static ggml_status parakeet_compute_graph(parakeet_context* ctx, ggml_cgraph* graph) {
+    parakeet_set_backend_abort_callback(ctx, ctx->abort_callback, ctx->abort_callback_user_data);
+    ggml_status status = ggml_backend_sched_graph_compute(ctx->sched, graph);
+    parakeet_set_backend_abort_callback(ctx, nullptr, nullptr);
+    return status;
+}
 
 // ---------------------------------------------------------------------------
 // Transformer-XL relative-position shift.
@@ -306,7 +332,7 @@ static ggml_tensor* require(parakeet_model& m, const char* name) {
 // ===========================================================================
 
 static bool parakeet_load_model(parakeet_model& model, parakeet_vocab& vocab, const char* path,
-                                ggml_backend_t backend) {
+                                ggml_backend_t backend, int verbosity) {
     // ---- pass 1: read hparams + vocab via metadata-only context ----
     {
         gguf_context* gctx = core_gguf::open_metadata(path);
@@ -510,16 +536,18 @@ static bool parakeet_load_model(parakeet_model& model, parakeet_vocab& vocab, co
         if (it_w != model.tensors.end() && it_b != model.tensors.end()) {
             model.ctc_w = it_w->second;
             model.ctc_b = it_b->second;
-            fprintf(stderr, "parakeet: CTC head loaded (vocab=%u)\n", model.ctc_vocab_size);
+            if (verbosity > 0)
+                fprintf(stderr, "parakeet: CTC head loaded (vocab=%u)\n", model.ctc_vocab_size);
         } else {
             fprintf(stderr, "parakeet: has_ctc=true but ctc tensors missing — falling back to TDT\n");
             model.has_ctc = false;
         }
     }
 
-    fprintf(stderr, "parakeet: vocab=%u  d_model=%u  n_layers=%u  n_heads=%u  ff=%u  pred=%u  joint=%u\n",
-            model.hparams.vocab_size, model.hparams.d_model, model.hparams.n_layers, model.hparams.n_heads,
-            model.hparams.ff_dim, model.hparams.pred_hidden, model.hparams.joint_hidden);
+    if (verbosity > 0)
+        fprintf(stderr, "parakeet: vocab=%u  d_model=%u  n_layers=%u  n_heads=%u  ff=%u  pred=%u  joint=%u\n",
+                model.hparams.vocab_size, model.hparams.d_model, model.hparams.n_layers, model.hparams.n_heads,
+                model.hparams.ff_dim, model.hparams.pred_hidden, model.hparams.joint_hidden);
 
     // Issue #89 follow-up (#221d): the JA model's TDT decode is degenerate at
     // q4-class quantisation (joint.pred / decoder.embed fall back to q4_0
@@ -712,7 +740,7 @@ static void parakeet_apply_znorm(float* mel, int T, int n_mels, const double* ba
 // the BN block entirely.
 // ===========================================================================
 
-static void parakeet_fold_batchnorm(parakeet_model& model, ggml_backend_t backend) {
+static void parakeet_fold_batchnorm(parakeet_model& model, ggml_backend_t backend, int verbosity) {
     const int d = (int)model.hparams.d_model;
     const int K = (int)model.hparams.conv_kernel;
     const float eps = 1e-5f;
@@ -793,7 +821,8 @@ static void parakeet_fold_batchnorm(parakeet_model& model, ggml_backend_t backen
         }
     }
 
-    fprintf(stderr, "parakeet: BN folded into conv_dw weights for %u layers\n", n_layers);
+    if (verbosity > 0)
+        fprintf(stderr, "parakeet: BN folded into conv_dw weights for %u layers\n", n_layers);
 }
 
 // ===========================================================================
@@ -993,8 +1022,9 @@ static std::vector<float> parakeet_encode_mel(parakeet_context* ctx, const float
 
     // Compute
     int64_t t_comp0 = probe_time ? ggml_time_us() : 0;
-    if (ggml_backend_sched_graph_compute(ctx->sched, gf) != GGML_STATUS_SUCCESS) {
-        fprintf(stderr, "parakeet: encoder graph compute failed\n");
+    if (parakeet_compute_graph(ctx, gf) != GGML_STATUS_SUCCESS) {
+        if (!parakeet_should_abort(ctx))
+            fprintf(stderr, "parakeet: encoder graph compute failed\n");
         return {};
     }
     int64_t t_comp_us = probe_time ? ggml_time_us() - t_comp0 : 0;
@@ -1475,6 +1505,8 @@ static std::vector<parakeet_emitted_token> parakeet_tdt_decode(parakeet_context*
     std::vector<float> all_proj_e((size_t)T_enc * J.joint_hidden);
     {
         for (int t = 0; t < T_enc; t++) {
+            if (parakeet_should_abort(ctx))
+                return {};
             float* dst = all_proj_e.data() + (size_t)t * J.joint_hidden;
             std::copy(J.enc_b.begin(), J.enc_b.end(), dst);
         }
@@ -1512,12 +1544,16 @@ static std::vector<parakeet_emitted_token> parakeet_tdt_decode(parakeet_context*
     int t = 0;
     int total_steps = 0;
     while (t < T_enc) {
+        if (parakeet_should_abort(ctx))
+            return {};
         // §232: use pre-computed projection instead of per-frame sgemv
         std::copy(all_proj_e.data() + (size_t)t * J.joint_hidden, all_proj_e.data() + (size_t)(t + 1) * J.joint_hidden,
                   proj_e.data());
 
         int n_inner = 0;
         while (n_inner < max_per_step) {
+            if (parakeet_should_abort(ctx))
+                return {};
             if (ggml_dec)
                 parakeet_joint_step_ggml(ctx, gdec, proj_e.data(), pred_out.data(), logits);
             else
@@ -2878,13 +2914,13 @@ extern "C" struct parakeet_context* parakeet_init_from_file(const char* path_mod
     if (!ctx->backend)
         ctx->backend = ctx->backend_cpu;
 
-    if (!parakeet_load_model(ctx->model, ctx->vocab, path_model, ctx->backend)) {
+    if (!parakeet_load_model(ctx->model, ctx->vocab, path_model, ctx->backend, params.verbosity)) {
         fprintf(stderr, "parakeet: failed to load '%s'\n", path_model);
         parakeet_free(ctx);
         return nullptr;
     }
 
-    parakeet_fold_batchnorm(ctx->model, ctx->backend);
+    parakeet_fold_batchnorm(ctx->model, ctx->backend, params.verbosity);
 
     // Repack F16 conv pw1/pw2 to Q8_0 (issue #81 — the 3D conv layout dodges
     // crispasr-quantize, and the CPU F16 mul_mat path is ~6x slower than Q8_0).
@@ -2894,8 +2930,8 @@ extern "C" struct parakeet_context* parakeet_init_from_file(const char* path_mod
         for (auto& e : m.enc)
             layers.push_back(&e);
         const bool quantized = !m.enc.empty() && m.enc[0].attn_q_w && ggml_is_quantized(m.enc[0].attn_q_w->type);
-        core_conformer::repack_conv_pw_q8(layers, ctx->backend, quantized, m.pw_q8, "parakeet");
-        core_conformer::fuse_qkv(layers, ctx->backend, m.qkv_fused, "parakeet");
+        core_conformer::repack_conv_pw_q8(layers, ctx->backend, quantized, m.pw_q8, "parakeet", params.verbosity);
+        core_conformer::fuse_qkv(layers, ctx->backend, m.qkv_fused, "parakeet", params.verbosity);
     }
 
     // Hybrid TDT+CTC models with a single-LSTM predictor (parakeet-tdt_ctc-110m
@@ -2903,7 +2939,8 @@ extern "C" struct parakeet_context* parakeet_init_from_file(const char* path_mod
     // a 2-layer LSTM. Default to CTC so the model just works out of the box.
     if (ctx->model.hparams.pred_layers < 2 && ctx->model.has_ctc) {
         ctx->decode_ctc = true;
-        fprintf(stderr, "parakeet: single-LSTM predictor + CTC head detected → defaulting to CTC decode\n");
+        if (params.verbosity > 0)
+            fprintf(stderr, "parakeet: single-LSTM predictor + CTC head detected → defaulting to CTC decode\n");
     }
     return ctx;
 }
@@ -2928,6 +2965,18 @@ extern "C" void parakeet_free(struct parakeet_context* ctx) {
     if (ctx->backend_cpu)
         ggml_backend_free(ctx->backend_cpu);
     delete ctx;
+}
+
+extern "C" void parakeet_set_abort_callback(struct parakeet_context* ctx, parakeet_abort_callback callback,
+                                             void* user_data) {
+    if (ctx) {
+        ctx->abort_callback = callback;
+        ctx->abort_callback_user_data = user_data;
+    }
+}
+
+extern "C" const char* parakeet_backend_name(struct parakeet_context* ctx) {
+    return ctx && ctx->backend ? ggml_backend_name(ctx->backend) : nullptr;
 }
 
 // Internal C++ entry point for tests — declared in parakeet.h via a different
@@ -3926,8 +3975,10 @@ extern "C" struct parakeet_result* parakeet_transcribe_streamed(struct parakeet_
 // ---------------------------------------------------------------------------
 
 extern "C" struct parakeet_result* parakeet_transcribe_ex(struct parakeet_context* ctx, const float* samples,
-                                                          int n_samples, int64_t t_offset_cs) {
+                                                           int n_samples, int64_t t_offset_cs) {
     if (!ctx || !samples || n_samples <= 0)
+        return nullptr;
+    if (parakeet_should_abort(ctx))
         return nullptr;
 
     // 1. Mel
@@ -3938,6 +3989,8 @@ extern "C" struct parakeet_result* parakeet_transcribe_ex(struct parakeet_contex
         mel = parakeet_compute_mel_impl(ctx, samples, n_samples, T_mel);
     }
     if (mel.empty())
+        return nullptr;
+    if (parakeet_should_abort(ctx))
         return nullptr;
     if (crispasr_env::get("CRISPASR_PARAKEET_DEBUG"))
         fprintf(stderr, "parakeet: mel OK (%d frames)\n", T_mel);
@@ -3950,6 +4003,8 @@ extern "C" struct parakeet_result* parakeet_transcribe_ex(struct parakeet_contex
         enc = parakeet_encode_mel(ctx, mel.data(), (int)ctx->model.hparams.n_mels, T_mel, &T_enc);
     }
     if (enc.empty())
+        return nullptr;
+    if (parakeet_should_abort(ctx))
         return nullptr;
     if (crispasr_env::get("CRISPASR_PARAKEET_DEBUG")) {
         fprintf(stderr, "parakeet: encoder OK (%d frames)\n", T_enc);
@@ -3983,6 +4038,8 @@ extern "C" struct parakeet_result* parakeet_transcribe_ex(struct parakeet_contex
                : use_beam ? parakeet_tdt_beam_decode(ctx, enc.data(), T_enc, d, ctx->decode_beam_size)
                           : (getenv("CRISPASR_TDT_BATCH") ? parakeet_tdt_decode_batched(ctx, enc.data(), T_enc, d)
                                                           : parakeet_tdt_decode(ctx, enc.data(), T_enc, d)));
+    if (parakeet_should_abort(ctx))
+        return nullptr;
     if (crispasr_env::get("CRISPASR_PARAKEET_DEBUG"))
         fprintf(stderr, "parakeet: %s%s decode OK (%d tokens)\n",
                 use_ctc    ? "CTC"

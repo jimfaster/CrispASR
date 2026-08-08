@@ -521,6 +521,17 @@ CA_EXPORT void crispasr_params_set_vad_min_silence_ms(whisper_full_params* p, in
     if (p)
         p->vad_params.min_silence_duration_ms = ms;
 }
+CA_EXPORT void crispasr_params_set_vad_speech_pad_ms(whisper_full_params* p, int ms) {
+    if (p)
+        p->vad_params.speech_pad_ms = ms;
+}
+CA_EXPORT void crispasr_params_set_abort_callback(whisper_full_params* p, crispasr_abort_callback abort_callback,
+                                                  void* abort_callback_user_data) {
+    if (p) {
+        p->abort_callback = abort_callback;
+        p->abort_callback_user_data = abort_callback_user_data;
+    }
+}
 
 // tinydiarize (`tdrz`) — whisper's own experimental speaker-turn marker
 // injection. Requires a whisper *.en.tdrz finetune. Emits `[SPEAKER_TURN]`
@@ -537,6 +548,14 @@ CA_EXPORT void crispasr_params_set_tdrz(whisper_full_params* p, int v) {
 // DTW fields live on `whisper_context_params`, set at context init. This
 // setter lets Dart configure DTW token-level timestamps via a pointer to
 // the params struct without mirroring its layout.
+
+CA_EXPORT void crispasr_ctx_params_set_gpu(whisper_context_params* p, int enabled, int gpu_device) {
+    if (p) {
+        p->use_gpu = enabled != 0;
+        p->flash_attn = enabled != 0;
+        p->gpu_device = gpu_device;
+    }
+}
 
 CA_EXPORT void crispasr_ctx_params_set_dtw(whisper_context_params* p, bool enable,
                                            int aheads_preset, // cast to whisper_alignment_heads_preset
@@ -647,22 +666,27 @@ CA_EXPORT int crispasr_token_alt_text(whisper_context* ctx, int i_seg, int i_tok
 // `out_code` (e.g. "de") and returns the detected-language probability.
 // Returns negative on error.
 
-CA_EXPORT float crispasr_detect_language(whisper_context* ctx, const float* pcm, int n_samples, int n_threads,
-                                         char* out_code, int out_cap) {
+CA_EXPORT float crispasr_detect_language_with_abort(whisper_context* ctx, const float* pcm, int n_samples,
+                                                    int n_threads, char* out_code, int out_cap,
+                                                    crispasr_abort_callback abort_callback,
+                                                    void* abort_callback_user_data) {
     if (!ctx || !pcm || n_samples <= 0 || !out_code || out_cap <= 0) {
         return -1.0f;
     }
 
-    // whisper requires mel + encode before lang auto-detect can run.
+    if (abort_callback && abort_callback(abort_callback_user_data)) {
+        return -2.0f;
+    }
     if (whisper_pcm_to_mel(ctx, pcm, n_samples, n_threads > 0 ? n_threads : 4) != 0) {
         return -2.0f;
     }
-    if (whisper_encode(ctx, 0, n_threads > 0 ? n_threads : 4) != 0) {
+    if (abort_callback && abort_callback(abort_callback_user_data)) {
         return -3.0f;
     }
 
     std::vector<float> probs(whisper_lang_max_id() + 1, 0.0f);
-    const int lang_id = whisper_lang_auto_detect(ctx, 0, n_threads > 0 ? n_threads : 4, probs.data());
+    const int lang_id = whisper_lang_auto_detect_with_abort(ctx, 0, n_threads > 0 ? n_threads : 4, probs.data(),
+                                                            abort_callback, abort_callback_user_data);
     if (lang_id < 0)
         return -4.0f;
 
@@ -673,6 +697,15 @@ CA_EXPORT float crispasr_detect_language(whisper_context* ctx, const float* pcm,
     std::strncpy(out_code, code, out_cap - 1);
     out_code[out_cap - 1] = '\0';
     return probs[lang_id];
+}
+
+CA_EXPORT float crispasr_detect_language(whisper_context* ctx, const float* pcm, int n_samples, int n_threads,
+                                         char* out_code, int out_cap) {
+    return crispasr_detect_language_with_abort(ctx, pcm, n_samples, n_threads, out_code, out_cap, nullptr, nullptr);
+}
+
+CA_EXPORT const char* crispasr_whisper_backend_name(whisper_context* ctx) {
+    return whisper_backend_name(ctx);
 }
 
 // =========================================================================
@@ -1282,6 +1315,21 @@ CA_EXPORT parakeet_result* crispasr_parakeet_transcribe(parakeet_context* ctx, c
     if (!ctx || !pcm || n_samples <= 0)
         return nullptr;
     return parakeet_transcribe_ex(ctx, pcm, n_samples, t_offset_cs);
+}
+
+CA_EXPORT parakeet_result* crispasr_parakeet_transcribe_with_abort(
+    parakeet_context* ctx, const float* pcm, int n_samples, int64_t t_offset_cs,
+    crispasr_abort_callback abort_callback, void* abort_callback_user_data) {
+    if (!ctx || !pcm || n_samples <= 0)
+        return nullptr;
+    parakeet_set_abort_callback(ctx, abort_callback, abort_callback_user_data);
+    parakeet_result* result = parakeet_transcribe_ex(ctx, pcm, n_samples, t_offset_cs);
+    parakeet_set_abort_callback(ctx, nullptr, nullptr);
+    return result;
+}
+
+CA_EXPORT const char* crispasr_parakeet_backend_name(parakeet_context* ctx) {
+    return parakeet_backend_name(ctx);
 }
 
 CA_EXPORT const char* crispasr_parakeet_result_text(parakeet_result* r) {

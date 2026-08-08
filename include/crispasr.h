@@ -346,6 +346,12 @@ CRISPASR_API const char* whisper_lang_str_full(int id);
 // ref: https://github.com/openai/whisper/blob/main/whisper/decoding.py#L18-L69
 CRISPASR_API int whisper_lang_auto_detect(struct whisper_context* ctx, int offset_ms, int n_threads, float* lang_probs);
 
+CRISPASR_API int whisper_lang_auto_detect_with_abort(struct whisper_context* ctx, int offset_ms, int n_threads,
+                                                     float* lang_probs, ggml_abort_callback abort_callback,
+                                                     void* abort_callback_user_data);
+
+CRISPASR_API const char* whisper_backend_name(struct whisper_context* ctx);
+
 CRISPASR_API int whisper_lang_auto_detect_with_state(struct whisper_context* ctx, struct whisper_state* state,
                                                      int offset_ms, int n_threads, float* lang_probs);
 

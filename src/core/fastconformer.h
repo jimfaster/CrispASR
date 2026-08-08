@@ -372,7 +372,7 @@ struct PwRepackBuf {
 // should be true when the surrounding model weights are quantized (used by
 // the auto gate). Returns the number of tensors repacked.
 static inline int repack_conv_pw_q8(std::vector<BlockWeights*>& layers, ggml_backend_t backend, bool model_quantized,
-                                    PwRepackBuf& out, const char* tag) {
+                                    PwRepackBuf& out, const char* tag, int verbosity = 1) {
     const int mode = fc_pw_q8_mode();
     if (mode == 0 || (mode == -1 && !model_quantized))
         return 0;
@@ -433,7 +433,8 @@ static inline int repack_conv_pw_q8(std::vector<BlockWeights*>& layers, ggml_bac
         *j.first = j.second;
     }
 
-    fprintf(stderr, "%s: repacked %zu F16 conv pw tensors to Q8_0 (CRISPASR_FC_PW_Q8)\n", tag, jobs.size());
+    if (verbosity > 0)
+        fprintf(stderr, "%s: repacked %zu F16 conv pw tensors to Q8_0 (CRISPASR_FC_PW_Q8)\n", tag, jobs.size());
     return (int)jobs.size();
 }
 
@@ -456,7 +457,7 @@ static inline bool fc_fused_qkv_enabled() {
 }
 
 static inline int fuse_qkv(std::vector<BlockWeights*>& layers, ggml_backend_t backend, PwRepackBuf& out,
-                           const char* tag) {
+                           const char* tag, int verbosity = 1) {
     if (!fc_fused_qkv_enabled())
         return 0;
 
@@ -542,7 +543,8 @@ static inline int fuse_qkv(std::vector<BlockWeights*>& layers, ggml_backend_t ba
         n_fused++;
     }
 
-    fprintf(stderr, "%s: fused Q/K/V projections for %d layers (CRISPASR_FC_FUSED_QKV)\n", tag, n_fused);
+    if (verbosity > 0)
+        fprintf(stderr, "%s: fused Q/K/V projections for %d layers (CRISPASR_FC_FUSED_QKV)\n", tag, n_fused);
     return n_fused;
 }
 
