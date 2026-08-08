@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 struct parakeet_context;
+typedef bool (*parakeet_abort_callback)(void* user_data);
 
 struct parakeet_context_params {
     int n_threads;
@@ -32,6 +33,8 @@ struct parakeet_context_params parakeet_context_default_params(void);
 struct parakeet_context* parakeet_init_from_file(const char* path_model, struct parakeet_context_params params);
 
 void parakeet_free(struct parakeet_context* ctx);
+void parakeet_set_abort_callback(struct parakeet_context* ctx, parakeet_abort_callback callback, void* user_data);
+const char* parakeet_backend_name(struct parakeet_context* ctx);
 
 // ---- Per-token data returned by parakeet_transcribe_ex() ----
 

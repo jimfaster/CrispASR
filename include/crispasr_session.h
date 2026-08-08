@@ -53,6 +53,7 @@ struct parakeet_context;
 typedef struct parakeet_context parakeet_context;
 struct parakeet_result;
 typedef struct parakeet_result parakeet_result;
+typedef bool (*crispasr_abort_callback)(void* user_data);
 struct whisper_context;
 typedef struct whisper_context whisper_context;
 struct whisper_context_params;
@@ -155,7 +156,12 @@ CRISPASR_SESSION_API void crispasr_params_set_vad_model_path(whisper_full_params
 CRISPASR_SESSION_API void crispasr_params_set_vad_threshold(whisper_full_params* p, float t);
 CRISPASR_SESSION_API void crispasr_params_set_vad_min_speech_ms(whisper_full_params* p, int ms);
 CRISPASR_SESSION_API void crispasr_params_set_vad_min_silence_ms(whisper_full_params* p, int ms);
+CRISPASR_SESSION_API void crispasr_params_set_vad_speech_pad_ms(whisper_full_params* p, int ms);
+CRISPASR_SESSION_API void crispasr_params_set_abort_callback(whisper_full_params* p,
+                                                             crispasr_abort_callback abort_callback,
+                                                             void* abort_callback_user_data);
 CRISPASR_SESSION_API void crispasr_params_set_tdrz(whisper_full_params* p, int v);
+CRISPASR_SESSION_API void crispasr_ctx_params_set_gpu(whisper_context_params* p, int enabled, int gpu_device);
 CRISPASR_SESSION_API void crispasr_ctx_params_set_dtw(whisper_context_params* p, bool enable, int aheads_preset,
                                                       int n_top);
 CRISPASR_SESSION_API int64_t crispasr_token_t0(whisper_context* ctx, int i_seg, int i_tok);
@@ -170,6 +176,11 @@ CRISPASR_SESSION_API int crispasr_token_alt_text(whisper_context* ctx, int i_seg
                                                  int out_cap);
 CRISPASR_SESSION_API float crispasr_detect_language(whisper_context* ctx, const float* pcm, int n_samples,
                                                     int n_threads, char* out_code, int out_cap);
+CRISPASR_SESSION_API float crispasr_detect_language_with_abort(whisper_context* ctx, const float* pcm, int n_samples,
+                                                               int n_threads, char* out_code, int out_cap,
+                                                               crispasr_abort_callback abort_callback,
+                                                               void* abort_callback_user_data);
+CRISPASR_SESSION_API const char* crispasr_whisper_backend_name(whisper_context* ctx);
 CRISPASR_SESSION_API int crispasr_vad_segments(const char* vad_model_path, const float* pcm, int n_samples,
                                                int sample_rate, float threshold, int min_speech_ms, int min_silence_ms,
                                                int n_threads, bool use_gpu, float** out_spans);
@@ -196,6 +207,10 @@ CRISPASR_SESSION_API parakeet_context* crispasr_parakeet_init(const char* model_
 CRISPASR_SESSION_API void crispasr_parakeet_free(parakeet_context* ctx);
 CRISPASR_SESSION_API parakeet_result* crispasr_parakeet_transcribe(parakeet_context* ctx, const float* pcm,
                                                                    int n_samples, int64_t t_offset_cs);
+CRISPASR_SESSION_API parakeet_result* crispasr_parakeet_transcribe_with_abort(
+    parakeet_context* ctx, const float* pcm, int n_samples, int64_t t_offset_cs,
+    crispasr_abort_callback abort_callback, void* abort_callback_user_data);
+CRISPASR_SESSION_API const char* crispasr_parakeet_backend_name(parakeet_context* ctx);
 CRISPASR_SESSION_API const char* crispasr_parakeet_result_text(parakeet_result* r);
 CRISPASR_SESSION_API int crispasr_parakeet_result_n_words(parakeet_result* r);
 CRISPASR_SESSION_API const char* crispasr_parakeet_result_word_text(parakeet_result* r, int i);
