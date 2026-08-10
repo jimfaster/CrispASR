@@ -1412,6 +1412,14 @@ CA_EXPORT const char* crispasr_cohere_result_text(cohere_result* r) {
     return (r && r->text) ? r->text : "";
 }
 
+CA_EXPORT int crispasr_cohere_result_n_tokens(cohere_result* r) {
+    return r ? r->n_tokens : 0;
+}
+
+CA_EXPORT float crispasr_cohere_result_token_p(cohere_result* r, int i) {
+    return (r && r->tokens && i >= 0 && i < r->n_tokens) ? r->tokens[i].p : -1.0f;
+}
+
 CA_EXPORT void crispasr_cohere_result_free(cohere_result* r) {
     cohere_result_free(r);
 }

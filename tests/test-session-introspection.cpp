@@ -13,7 +13,8 @@
 //
 // Coverage: crispasr_session_detected_language,
 // crispasr_session_result_segment_no_speech_prob, crispasr_session_n_vocab,
-// crispasr_session_token_text — declared in include/crispasr_session.h.
+// crispasr_session_token_text, crispasr_cohere_result_n_tokens,
+// crispasr_cohere_result_token_p — declared in include/crispasr_session.h.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -50,6 +51,15 @@ TEST_CASE("session introspection: no_speech_prob null-result → -1.0 sentinel",
 
 TEST_CASE("session introspection: no_speech_prob negative segment index → -1.0", "[unit][introspection]") {
     REQUIRE(crispasr_session_result_segment_no_speech_prob(nullptr, -1) == -1.0f);
+}
+
+TEST_CASE("session introspection: Cohere token count null-result returns zero", "[unit][introspection]") {
+    REQUIRE(crispasr_cohere_result_n_tokens(nullptr) == 0);
+}
+
+TEST_CASE("session introspection: Cohere token probability null-result returns sentinel", "[unit][introspection]") {
+    REQUIRE(crispasr_cohere_result_token_p(nullptr, 0) == -1.0f);
+    REQUIRE(crispasr_cohere_result_token_p(nullptr, -1) == -1.0f);
 }
 
 // ─── CTC vocab: null-session guards (0 / "") ────────────────────────────────
