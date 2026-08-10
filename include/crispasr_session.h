@@ -233,6 +233,8 @@ CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_abort(
     crispasr_abort_callback abort_callback, void* abort_callback_user_data);
 CRISPASR_SESSION_API const char* crispasr_cohere_backend_name(cohere_context* ctx);
 CRISPASR_SESSION_API const char* crispasr_cohere_result_text(cohere_result* r);
+CRISPASR_SESSION_API int crispasr_cohere_result_n_tokens(cohere_result* r);
+CRISPASR_SESSION_API float crispasr_cohere_result_token_p(cohere_result* r, int i);
 CRISPASR_SESSION_API void crispasr_cohere_result_free(cohere_result* r);
 // Issue #214: set the preferred GPU backend name ("cuda", "vulkan",
 // "metal"). Call before any crispasr_session_open*. NULL or "" = auto.
