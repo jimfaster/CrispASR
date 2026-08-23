@@ -585,6 +585,16 @@ CA_EXPORT int64_t crispasr_token_t1(whisper_context* ctx, int i_seg, int i_tok) 
         return 0;
     return whisper_full_get_token_data(ctx, i_seg, i_tok).t1;
 }
+CA_EXPORT int64_t crispasr_token_original_t0(whisper_context* ctx, int i_seg, int i_tok) {
+    if (!ctx)
+        return 0;
+    return whisper_full_get_token_t0(ctx, i_seg, i_tok);
+}
+CA_EXPORT int64_t crispasr_token_original_t1(whisper_context* ctx, int i_seg, int i_tok) {
+    if (!ctx)
+        return 0;
+    return whisper_full_get_token_t1(ctx, i_seg, i_tok);
+}
 CA_EXPORT float crispasr_token_p(whisper_context* ctx, int i_seg, int i_tok) {
     if (!ctx)
         return 0.0f;
@@ -1414,6 +1424,18 @@ CA_EXPORT const char* crispasr_cohere_result_text(cohere_result* r) {
 
 CA_EXPORT int crispasr_cohere_result_n_tokens(cohere_result* r) {
     return r ? r->n_tokens : 0;
+}
+
+CA_EXPORT const char* crispasr_cohere_result_token_text(cohere_result* r, int i) {
+    return (r && r->tokens && i >= 0 && i < r->n_tokens) ? r->tokens[i].text : "";
+}
+
+CA_EXPORT int64_t crispasr_cohere_result_token_t0(cohere_result* r, int i) {
+    return (r && r->tokens && i >= 0 && i < r->n_tokens) ? r->tokens[i].t0 : 0;
+}
+
+CA_EXPORT int64_t crispasr_cohere_result_token_t1(cohere_result* r, int i) {
+    return (r && r->tokens && i >= 0 && i < r->n_tokens) ? r->tokens[i].t1 : 0;
 }
 
 CA_EXPORT float crispasr_cohere_result_token_p(cohere_result* r, int i) {

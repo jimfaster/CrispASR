@@ -81,9 +81,9 @@ void cohere_result_free(struct cohere_result* r);
 //   Pass 0 when processing a single file without VAD segmentation.
 //   With VAD, pass (vad_segment_t0_seconds * 100).
 //
-// Token times are linearly interpolated across the segment duration,
-// proportional to each token's decoded text length (best approximation
-// without model-native timestamp tokens).
+// Token times use monotone DTW over decoder cross-attention when those
+// weights are available. They fall back to character-length interpolation
+// only when alignment weights are unavailable.
 //
 // Returns NULL on failure. Free result with cohere_result_free().
 struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const float* samples, int n_samples,

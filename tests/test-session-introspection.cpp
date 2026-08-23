@@ -14,7 +14,8 @@
 // Coverage: crispasr_session_detected_language,
 // crispasr_session_result_segment_no_speech_prob, crispasr_session_n_vocab,
 // crispasr_session_token_text, crispasr_cohere_result_n_tokens,
-// crispasr_cohere_result_token_p — declared in include/crispasr_session.h.
+// crispasr_cohere_result_token_*, crispasr_token_original_t0/t1 — declared in
+// include/crispasr_session.h.
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -60,6 +61,17 @@ TEST_CASE("session introspection: Cohere token count null-result returns zero", 
 TEST_CASE("session introspection: Cohere token probability null-result returns sentinel", "[unit][introspection]") {
     REQUIRE(crispasr_cohere_result_token_p(nullptr, 0) == -1.0f);
     REQUIRE(crispasr_cohere_result_token_p(nullptr, -1) == -1.0f);
+}
+
+TEST_CASE("session introspection: Cohere token detail null-result returns safe sentinels", "[unit][introspection]") {
+    REQUIRE(std::strcmp(crispasr_cohere_result_token_text(nullptr, 0), "") == 0);
+    REQUIRE(crispasr_cohere_result_token_t0(nullptr, 0) == 0);
+    REQUIRE(crispasr_cohere_result_token_t1(nullptr, 0) == 0);
+}
+
+TEST_CASE("session introspection: original Whisper token times reject null context", "[unit][introspection]") {
+    REQUIRE(crispasr_token_original_t0(nullptr, 0, 0) == 0);
+    REQUIRE(crispasr_token_original_t1(nullptr, 0, 0) == 0);
 }
 
 // ─── CTC vocab: null-session guards (0 / "") ────────────────────────────────
