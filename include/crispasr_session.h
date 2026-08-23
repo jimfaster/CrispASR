@@ -170,6 +170,10 @@ CRISPASR_SESSION_API void crispasr_ctx_params_set_dtw(whisper_context_params* p,
                                                       int n_top);
 CRISPASR_SESSION_API int64_t crispasr_token_t0(whisper_context* ctx, int i_seg, int i_tok);
 CRISPASR_SESSION_API int64_t crispasr_token_t1(whisper_context* ctx, int i_seg, int i_tok);
+// Original input-audio clock. Existing t0/t1 accessors above intentionally
+// retain their raw whisper_token_data semantics for ABI compatibility.
+CRISPASR_SESSION_API int64_t crispasr_token_original_t0(whisper_context* ctx, int i_seg, int i_tok);
+CRISPASR_SESSION_API int64_t crispasr_token_original_t1(whisper_context* ctx, int i_seg, int i_tok);
 CRISPASR_SESSION_API float crispasr_token_p(whisper_context* ctx, int i_seg, int i_tok);
 CRISPASR_SESSION_API int64_t crispasr_token_dtw_t(whisper_context* ctx, int i_segment, int i_token);
 CRISPASR_SESSION_API void crispasr_params_set_alt_n(whisper_full_params* p, int n);
@@ -234,6 +238,9 @@ CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_abort(
 CRISPASR_SESSION_API const char* crispasr_cohere_backend_name(cohere_context* ctx);
 CRISPASR_SESSION_API const char* crispasr_cohere_result_text(cohere_result* r);
 CRISPASR_SESSION_API int crispasr_cohere_result_n_tokens(cohere_result* r);
+CRISPASR_SESSION_API const char* crispasr_cohere_result_token_text(cohere_result* r, int i);
+CRISPASR_SESSION_API int64_t crispasr_cohere_result_token_t0(cohere_result* r, int i);
+CRISPASR_SESSION_API int64_t crispasr_cohere_result_token_t1(cohere_result* r, int i);
 CRISPASR_SESSION_API float crispasr_cohere_result_token_p(cohere_result* r, int i);
 CRISPASR_SESSION_API void crispasr_cohere_result_free(cohere_result* r);
 // Issue #214: set the preferred GPU backend name ("cuda", "vulkan",

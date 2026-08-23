@@ -744,6 +744,14 @@ CRISPASR_API whisper_token_data whisper_full_get_token_data(struct whisper_conte
 CRISPASR_API whisper_token_data whisper_full_get_token_data_from_state(struct whisper_state* state, int i_segment,
                                                                        int i_token);
 
+// Token timestamps on the original input-audio clock. When VAD is disabled
+// these equal whisper_token_data::t0/t1. When VAD is enabled they map the
+// filtered speech clock back through the exact VAD segments.
+CRISPASR_API int64_t whisper_full_get_token_t0(struct whisper_context* ctx, int i_segment, int i_token);
+CRISPASR_API int64_t whisper_full_get_token_t0_from_state(struct whisper_state* state, int i_segment, int i_token);
+CRISPASR_API int64_t whisper_full_get_token_t1(struct whisper_context* ctx, int i_segment, int i_token);
+CRISPASR_API int64_t whisper_full_get_token_t1_from_state(struct whisper_state* state, int i_segment, int i_token);
+
 // Get the probability of the specified token in the specified segment
 CRISPASR_API float whisper_full_get_token_p(struct whisper_context* ctx, int i_segment, int i_token);
 CRISPASR_API float whisper_full_get_token_p_from_state(struct whisper_state* state, int i_segment, int i_token);
