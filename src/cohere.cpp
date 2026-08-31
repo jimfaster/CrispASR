@@ -2194,6 +2194,12 @@ static void cohere_fold_batchnorm(cohere_model& model, int verbosity) {
 
 struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const float* samples, int n_samples,
                                            const char* lang, int64_t t_offset_cs) {
+    return cohere_transcribe_ex_with_progress(ctx, samples, n_samples, lang, t_offset_cs, nullptr, nullptr);
+}
+
+struct cohere_result* cohere_transcribe_ex_with_progress(
+    struct cohere_context* ctx, const float* samples, int n_samples, const char* lang, int64_t t_offset_cs,
+    cohere_progress_callback progress_callback, void* progress_callback_user_data) {
     if (!ctx || !samples || n_samples <= 0 || cohere_should_abort(ctx))
         return nullptr;
     const auto& hp = ctx->model.hparams;
@@ -2298,6 +2304,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
                     cohere_result_free(full);
                     return nullptr;
                 }
+                if (progress_callback)
+                    progress_callback(chunk_end, n_samples, progress_callback_user_data);
             }
             return full;
         }
@@ -3242,6 +3250,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
         return nullptr;
     }
     memcpy(res->text, full_text.c_str(), full_text.size() + 1);
+    if (progress_callback)
+        progress_callback(n_samples, n_samples, progress_callback_user_data);
     return res;
 }
 

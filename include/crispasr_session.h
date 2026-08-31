@@ -235,6 +235,10 @@ CRISPASR_SESSION_API void crispasr_cohere_free(cohere_context* ctx);
 CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_abort(
     cohere_context* ctx, const float* pcm, int n_samples, const char* language,
     crispasr_abort_callback abort_callback, void* abort_callback_user_data);
+CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_callbacks(
+    cohere_context* ctx, const float* pcm, int n_samples, const char* language,
+    crispasr_abort_callback abort_callback, void* abort_callback_user_data,
+    crispasr_progress_callback progress_callback, void* progress_callback_user_data);
 CRISPASR_SESSION_API const char* crispasr_cohere_backend_name(cohere_context* ctx);
 CRISPASR_SESSION_API const char* crispasr_cohere_result_text(cohere_result* r);
 CRISPASR_SESSION_API int crispasr_cohere_result_n_tokens(cohere_result* r);
