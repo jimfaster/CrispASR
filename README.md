@@ -530,7 +530,7 @@ crispasr -m ggml-tiny.bin -f speech.wav --lid-on-transcript auto
 # lang=de	conf=0.997123	backend=lid-cld3
 ```
 
-The dispatcher (`src/text_lid_dispatch.{h,cpp}`) is a thin C ABI
+The dispatcher (`crisp_lid/src/text_lid_dispatch.{h,cpp}`) is a thin C ABI
 façade — one integer compare per call; per-stage diff harness is
 green at cos≥0.999 across 8 multilingual smoke samples.
 
@@ -831,10 +831,11 @@ loader, FastConformer / Conformer / Granite-LLM blocks, etc.).
 - `crisp_lid/` — text-based language identification (fastText + CLD3)
 - `crisp_truecase/` — truecasing (statistical + CRF + BiLSTM)
 
-Both are self-contained static libraries with CMakeLists.txt. CrispEmbed
+These are self-contained static libraries with CMakeLists.txt. CrispEmbed
 links them via `add_subdirectory(../CrispASR/crisp_*/)`; CrispASR uses
-them directly. If the shared dir is absent, both repos fall back to local
-copies of the source files.
+them directly. CrispASR requires `crisp_lid/` for text language detection;
+there are no duplicate text-LID sources under `src/`. Other shared
+components retain their existing local fallbacks.
 
 For benchmarks see [`PERFORMANCE.md`](PERFORMANCE.md); for the
 session-by-session port log and the bug-class lessons, see

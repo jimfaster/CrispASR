@@ -263,7 +263,7 @@ install(TARGETS crispasr-diff RUNTIME BUNDLE DESTINATION bin)
 # peeking the GGUF's general.architecture key at load time. One binary
 # for any text-LID GGUF.
 #
-# Link order: text-lid-dispatch BEFORE crispasr-lib because the dispatch
+# Link order: crisp_lid BEFORE crispasr-lib because the dispatch
 # static library has unresolved references to crispasr_registry_lookup
 # / crispasr_cache::ensure_cached_file (in crispasr_model_registry.cpp
 # / crispasr_cache.cpp inside the main `crispasr-lib` library), and MinGW's
@@ -280,11 +280,7 @@ install(TARGETS crispasr-diff RUNTIME BUNDLE DESTINATION bin)
 # MSVC but MinGW silently ignores those pragmas.
 # ---------------------------------------------------------------------------
 add_executable(crispasr-lid crispasr_lid_main.cpp)
-if(TARGET crisp_lid)
-    target_link_libraries(crispasr-lid PRIVATE crisp_lid crispasr-lib)
-else()
-    target_link_libraries(crispasr-lid PRIVATE text-lid-dispatch crispasr-lib)
-endif()
+target_link_libraries(crispasr-lid PRIVATE crisp_lid crispasr-lib)
 target_link_libraries(crispasr-lid PRIVATE
     ${CMAKE_THREAD_LIBS_INIT}
     $<$<BOOL:${WIN32}>:winhttp>

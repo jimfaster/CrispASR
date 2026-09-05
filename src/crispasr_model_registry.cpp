@@ -1154,7 +1154,7 @@ constexpr Entry k_registry[] = {
      "~900 MB", nullptr, nullptr},
 
     // Text-LID — three families, one auto-routing dispatcher
-    // (`src/text_lid_dispatch.cpp`). `lid-cld3` is the default for
+    // (`crisp_lid/src/text_lid_dispatch.cpp`). `lid-cld3` is the default for
     // `crispasr-lid -m auto` because it's the smallest (440 KB F16),
     // Apache-2.0, and matches CLD3's full 109-language ISO 639-1 contract.
     {"lid-cld3", "cld3-f16.gguf",
