@@ -2315,24 +2315,11 @@ target_compile_features   (firered-lid PUBLIC cxx_std_17)
 target_link_libraries     (firered-lid PUBLIC firered-asr crispasr-core ggml ggml-base ggml-cpu)
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
 # crisp_lid — shared text LID library (fastText + CLD3).
-# Prefer shared library from crisp_lid/; fall back to local copies.
 # ---------------------------------------------------------------------------
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../crisp_lid/CMakeLists.txt" AND NOT TARGET crisp_lid)
+if(NOT TARGET crisp_lid)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../crisp_lid
                      ${CMAKE_BINARY_DIR}/crisp_lid)
-    message(STATUS "crispasr: using shared crisp_lid library")
-else()
-    # Local fallback: lid-fasttext
-    add_library(lid-fasttext STATIC lid_fasttext.h lid_fasttext.cpp)
-    set_target_properties(lid-fasttext PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_include_directories(lid-fasttext PUBLIC .)
-    target_compile_features   (lid-fasttext PUBLIC cxx_std_17)
-    target_link_libraries     (lid-fasttext PUBLIC crispasr-core ggml ggml-base ggml-cpu)
-    if(NOT MSVC)
-        target_compile_options(lid-fasttext PRIVATE -O3)
-    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -2399,34 +2386,6 @@ if(APPLE)
 endif()
 if(NOT MSVC)
     target_compile_options(silero-lid PRIVATE -O3)
-endif()
-
-# lid-cld3 — local fallback (only built if shared crisp_lid not available)
-if(NOT TARGET crisp_lid)
-    add_library(lid-cld3 STATIC lid_cld3.h lid_cld3.cpp)
-    set_target_properties(lid-cld3 PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_include_directories(lid-cld3 PUBLIC .)
-    target_compile_features   (lid-cld3 PUBLIC cxx_std_17)
-    target_link_libraries     (lid-cld3 PUBLIC crispasr-core ggml ggml-base ggml-cpu)
-    if(NOT MSVC)
-        target_compile_options(lid-cld3 PRIVATE -O3)
-    endif()
-endif()
-
-# ---------------------------------------------------------------------------
-# text-lid-dispatch — backend-agnostic façade over lid-fasttext + lid-cld3.
-# Peeks general.architecture and dispatches; one C ABI for any text-LID GGUF.
-# ---------------------------------------------------------------------------
-if(NOT TARGET crisp_lid)
-    add_library(text-lid-dispatch STATIC text_lid_dispatch.h text_lid_dispatch.cpp)
-    set_target_properties(text-lid-dispatch PROPERTIES POSITION_INDEPENDENT_CODE ON)
-    target_include_directories(text-lid-dispatch PUBLIC .)
-    target_compile_features   (text-lid-dispatch PUBLIC cxx_std_17)
-    target_compile_definitions(text-lid-dispatch PRIVATE CRISPASR_BUILD)
-    target_link_libraries     (text-lid-dispatch PUBLIC crispasr-core lid-fasttext lid-cld3)
-    if(NOT MSVC)
-        target_compile_options(text-lid-dispatch PRIVATE -O3)
-    endif()
 endif()
 
 # ---------------------------------------------------------------------------
@@ -2779,11 +2738,7 @@ endif()
 if (TARGET firered-lid)
     target_link_libraries(crispasr-lib PUBLIC firered-lid)
 endif()
-if (TARGET crisp_lid)
-    target_link_libraries(crispasr-lib PUBLIC crisp_lid)
-elseif (TARGET lid-fasttext)
-    target_link_libraries(crispasr-lib PUBLIC lid-fasttext)
-endif()
+target_link_libraries(crispasr-lib PUBLIC crisp_lid)
 if (TARGET omniasr)
     target_link_libraries(crispasr-lib PUBLIC omniasr)
 endif()
@@ -3016,17 +2971,6 @@ endif()
 if (TARGET silero-lid)
     target_link_libraries(crispasr-lib PUBLIC silero-lid)
 endif()
-# CLD3 text-LID — sibling of lid-fasttext, routed via the auto-routing
-# text-LID dispatcher in src/text_lid_dispatch.cpp.
-if (TARGET lid-cld3 AND NOT TARGET crisp_lid)
-    target_link_libraries(crispasr-lib PUBLIC lid-cld3)
-endif()
-# Text-LID dispatcher — selects between fastText and CLD3 by GGUF arch.
-# crispasr-lib (the main library) and crispasr-lid both go through this.
-if (TARGET text-lid-dispatch AND NOT TARGET crisp_lid)
-    target_link_libraries(crispasr-lib PUBLIC text-lid-dispatch)
-endif()
-
 # §248 source-separation backends — driven by the --separate CLI dispatcher
 # (examples/cli/crispasr_separate_cli.cpp), arch auto-detected from the GGUF.
 if (TARGET mel-band-roformer)

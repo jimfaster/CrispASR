@@ -891,7 +891,7 @@ a transcript or arbitrary UTF-8 string).
 ### Text LID (post-ASR / standalone)
 
 Runs on a transcript or any UTF-8 string. The dispatcher in
-`src/text_lid_dispatch.{h,cpp}` peeks the GGUF's `general.architecture`
+`crisp_lid/src/text_lid_dispatch.{h,cpp}` peeks the GGUF's `general.architecture`
 and picks fastText (GlotLID-V3 / LID-176) or Google CLD3 — same flag,
 same binary, any text-LID GGUF.
 

@@ -9,7 +9,7 @@ We re-implement CLD3's six feature extractors + forward pass in Python
 (F32 numpy throughout), then cross-check the top-1 + probability against
 ``pycld3`` (the upstream binding) — refusing to dump on mismatch. The
 algorithms here are the ground-truth definitions the C++ port in
-``src/lid_cld3.cpp`` must reproduce byte-exact:
+``crisp_lid/src/lid_cld3.cpp`` must reproduce byte-exact:
 
   * Hash:      MurmurHash2-32, seed ``0xBEEF`` (utils.cc:137-183)
   * Cleanup:   simplified — ASCII tolower + ASCII punct/digit strip.

@@ -2,7 +2,7 @@
 
 Captures the fastText classifier forward pass — tokenization → hashed
 char-n-gram bucket lookup → mean-pool → linear → softmax — at every
-stage the C++ port (``src/lid_fasttext.{h,cpp}``) needs to reproduce.
+stage the C++ port (``crisp_lid/src/lid_fasttext.{h,cpp}``) needs to reproduce.
 
 Stages dumped (matches ``DEFAULT_STAGES`` below):
 
