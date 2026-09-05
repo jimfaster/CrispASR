@@ -795,8 +795,6 @@ extern "C" struct lid_cld3_context* lid_cld3_init_from_file(const char* gguf_pat
     // a buffer that owns its memory; compute happens in the F32 vectors.
     ggml_backend_free(cpu);
 
-    fprintf(stderr, "lid_cld3: loaded %zu labels, hidden_dim=%d, n_features=%d (variant=%s)\n", ctx->labels.size(),
-            kHiddenDim, kNFeatures, ctx->variant.c_str());
     return ctx;
 }
 
