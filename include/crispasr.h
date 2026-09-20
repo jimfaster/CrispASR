@@ -622,6 +622,10 @@ CRISPASR_API int crispasr_session_set_alt_n(struct crispasr_session* s, int n);
 CRISPASR_API int crispasr_session_set_whisper_decode_extras(struct crispasr_session* s, int suppress_nst,
                                                             const char* suppress_regex, int carry_initial_prompt);
 CRISPASR_API int crispasr_session_set_ask(struct crispasr_session* s, const char* prompt);
+CRISPASR_API int crispasr_session_set_qwen3_assistant_prefill(struct crispasr_session* s, const char* text);
+CRISPASR_API const char* crispasr_session_qwen3_language(struct crispasr_session* s);
+CRISPASR_API const char* crispasr_session_qwen3_stable_prefix(
+    struct crispasr_session* s, const char* text, int unfixed_tokens);
 
 // TTS synthesis — returns malloc'd float32 PCM at 24 kHz mono.
 // Caller frees with crispasr_pcm_free(). Returns nullptr on failure.

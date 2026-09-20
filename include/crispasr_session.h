@@ -652,6 +652,13 @@ CRISPASR_SESSION_API int crispasr_session_set_punctuation(crispasr_session* s, i
 CRISPASR_SESSION_API int crispasr_session_set_punc_model(crispasr_session* s, const char* punc_model);
 CRISPASR_SESSION_API int crispasr_session_set_translate(crispasr_session* s, int enable);
 CRISPASR_SESSION_API int crispasr_session_set_ask(crispasr_session* s, const char* prompt);
+// Qwen3-ASR assistant prefill used by rolling-prefix models such as R2T2.
+// The stable-prefix helper tokenizes `text`, removes `unfixed_tokens` from
+// the end, and returns session-owned UTF-8 valid until the next call/close.
+CRISPASR_SESSION_API int crispasr_session_set_qwen3_assistant_prefill(crispasr_session* s, const char* text);
+CRISPASR_SESSION_API const char* crispasr_session_qwen3_language(crispasr_session* s);
+CRISPASR_SESSION_API const char* crispasr_session_qwen3_stable_prefix(
+    crispasr_session* s, const char* text, int unfixed_tokens);
 CRISPASR_SESSION_API int crispasr_session_set_temperature(crispasr_session* s, float temperature, uint64_t seed);
 CRISPASR_SESSION_API int crispasr_session_set_tts_seed(crispasr_session* s, uint64_t seed);
 CRISPASR_SESSION_API int crispasr_session_set_tts_steps(crispasr_session* s, int steps);

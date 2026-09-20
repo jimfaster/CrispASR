@@ -1796,6 +1796,12 @@ struct crispasr_session {
     // verbatim. Empty means "transcribe normally" — the historical
     // default.
     std::string ask;
+    // Exact assistant-turn text appended after Qwen3-ASR's generation prompt.
+    // R2T2 uses this to carry only token-stable transcript text across its
+    // rolling audio window. Empty keeps the normal Qwen3-ASR prompt contract.
+    std::string qwen3_assistant_prefill;
+    std::string qwen3_language;
+    std::string qwen3_stable_prefix_buf;
     // Best-of-N: run N independent decodes and keep the lowest-perplexity
     // one. Only effective when temperature > 0. Default 1 (no resampling).
     int best_of = 1;
@@ -5803,8 +5809,8 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
         // adapter (crispasr_backend_qwen3.cpp); the legacy system-turn
         // instruction stays behind CRISPASR_QWEN3_SYSPROMPT_LANG=1.
         std::string sys_instruction;
-        std::string assistant_prefill;
-        if (s->ask.empty()) {
+        std::string assistant_prefill = s->qwen3_assistant_prefill;
+        if (s->ask.empty() && assistant_prefill.empty()) {
             const std::string eff_lang = lang_set ? lang : s->source_language;
             if (!eff_lang.empty() && eff_lang != "auto") {
                 const char* legacy_env = getenv("CRISPASR_QWEN3_SYSPROMPT_LANG");
@@ -5930,9 +5936,21 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
         // way the CLI adapter does, and project surviving tokens into
         // ca_token_record for word grouping.
         std::string transcript;
+        std::string metadata;
         std::vector<ca_token_record> toks;
         toks.reserve(dec.tokens.size());
-        bool capture_language = false;
+        bool before_asr_text = assistant_prefill.empty();
+        auto capture_language = [&]() {
+            const size_t marker = metadata.find("language");
+            if (marker == std::string::npos)
+                return;
+            const size_t first = metadata.find_first_not_of(" \t\r\n", marker + 8);
+            if (first == std::string::npos)
+                return;
+            const size_t last = metadata.find_first_of(" \t\r\n", first);
+            s->qwen3_language = metadata.substr(
+                first, last == std::string::npos ? std::string::npos : last - first);
+        };
         for (size_t i = 0; i < dec.tokens.size(); i++) {
             const int32_t id = dec.tokens[i];
             if (id == eos_id)
@@ -5941,6 +5959,11 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
             if (!raw_piece || !*raw_piece)
                 continue;
             std::string raw = raw_piece;
+            if (before_asr_text && raw == "<asr_text>") {
+                capture_language();
+                before_asr_text = false;
+                continue;
+            }
             // Skip qwen3 special tokens and structured tags.
             if (raw.size() >= 2 && raw[0] == '<' && raw[1] == '|')
                 continue;
@@ -5949,12 +5972,8 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
             if (raw.size() >= 5 && raw[0] == '[' && raw[1] == 'P' && raw[2] == 'A' && raw[3] == 'D')
                 continue;
             std::string piece = gpt2_byte_decode(raw);
-            if (piece == "language") {
-                capture_language = true;
-                continue;
-            }
-            if (capture_language) {
-                capture_language = false; // language name eaten, no transcript contribution
+            if (before_asr_text) {
+                metadata += piece;
                 continue;
             }
             transcript += piece;
@@ -5965,8 +5984,12 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
             tk.p = (i < dec.probs.size()) ? dec.probs[i] : -1.0f;
             toks.push_back(std::move(tk));
         }
-        while (!transcript.empty() && (transcript.front() == ' ' || transcript.front() == '\n'))
-            transcript.erase(transcript.begin());
+        if (before_asr_text)
+            capture_language();
+        if (assistant_prefill.empty()) {
+            while (!transcript.empty() && (transcript.front() == ' ' || transcript.front() == '\n'))
+                transcript.erase(transcript.begin());
+        }
 
         crispasr_session_seg seg;
         seg.text = core_ngram::fix_loops(transcript);
@@ -10459,6 +10482,94 @@ CA_EXPORT int crispasr_session_set_ask(crispasr_session* s, const char* prompt) 
         return -1;
     s->ask = prompt ? prompt : "";
     return 0;
+}
+
+CA_EXPORT int crispasr_session_set_qwen3_assistant_prefill(crispasr_session* s, const char* text) {
+    if (!s)
+        return -1;
+    s->qwen3_assistant_prefill = text ? text : "";
+    if (s->qwen3_assistant_prefill.empty())
+        s->qwen3_language.clear();
+    return 0;
+}
+
+CA_EXPORT const char* crispasr_session_qwen3_language(crispasr_session* s) {
+#ifdef CA_HAVE_QWEN3
+    if (!s || !s->qwen3_ctx)
+        return "";
+    return s->qwen3_language.c_str();
+#else
+    (void)s;
+    return "";
+#endif
+}
+
+CA_EXPORT const char* crispasr_session_qwen3_stable_prefix(crispasr_session* s, const char* text,
+                                                            int unfixed_tokens) {
+#ifdef CA_HAVE_QWEN3
+    if (!s || !s->qwen3_ctx || !text || unfixed_tokens < 0)
+        return nullptr;
+
+    int n_tokens = 0;
+    int32_t* raw_ids = qwen3_asr_tokenize(s->qwen3_ctx, text, &n_tokens);
+    if (!raw_ids)
+        return nullptr;
+
+    auto valid_utf8 = [](const std::string& value) {
+        for (size_t i = 0; i < value.size();) {
+            const unsigned char lead = (unsigned char)value[i];
+            size_t count = 0;
+            uint32_t codepoint = 0;
+            if (lead <= 0x7f) {
+                i++;
+                continue;
+            } else if ((lead & 0xe0) == 0xc0) {
+                count = 2;
+                codepoint = lead & 0x1f;
+            } else if ((lead & 0xf0) == 0xe0) {
+                count = 3;
+                codepoint = lead & 0x0f;
+            } else if ((lead & 0xf8) == 0xf0) {
+                count = 4;
+                codepoint = lead & 0x07;
+            } else {
+                return false;
+            }
+            if (i + count > value.size())
+                return false;
+            for (size_t offset = 1; offset < count; offset++) {
+                const unsigned char continuation = (unsigned char)value[i + offset];
+                if ((continuation & 0xc0) != 0x80)
+                    return false;
+                codepoint = (codepoint << 6) | (continuation & 0x3f);
+            }
+            if ((count == 2 && codepoint < 0x80) || (count == 3 && codepoint < 0x800) ||
+                (count == 4 && codepoint < 0x10000) || (codepoint >= 0xd800 && codepoint <= 0xdfff) ||
+                codepoint > 0x10ffff)
+                return false;
+            i += count;
+        }
+        return true;
+    };
+
+    for (int keep = std::max(0, n_tokens - unfixed_tokens); keep >= 0; keep--) {
+        s->qwen3_stable_prefix_buf.clear();
+        for (int i = 0; i < keep; i++) {
+            const char* raw_piece = qwen3_asr_token_text(s->qwen3_ctx, raw_ids[i]);
+            if (raw_piece)
+                s->qwen3_stable_prefix_buf += gpt2_byte_decode(raw_piece);
+        }
+        if (valid_utf8(s->qwen3_stable_prefix_buf))
+            break;
+    }
+    std::free(raw_ids);
+    return s->qwen3_stable_prefix_buf.c_str();
+#else
+    (void)s;
+    (void)text;
+    (void)unfixed_tokens;
+    return nullptr;
+#endif
 }
 
 // Set decoder temperature on backends that expose runtime control:
