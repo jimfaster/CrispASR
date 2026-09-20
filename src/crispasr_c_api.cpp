@@ -5992,7 +5992,10 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
         }
 
         crispasr_session_seg seg;
-        seg.text = core_ngram::fix_loops(transcript);
+        // Rolling-prefix callers need the exact generated suffix: its first
+        // token may intentionally begin with whitespace that joins it to the
+        // assistant prefill. fix_loops() trims that boundary whitespace.
+        seg.text = assistant_prefill.empty() ? core_ngram::fix_loops(transcript) : transcript;
         seg.t0 = 0;
         seg.t1 = (int64_t)((double)n_samples * 100.0 / 16000.0);
         _fire_token_callbacks(s, toks);
