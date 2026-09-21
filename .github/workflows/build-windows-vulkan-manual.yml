@@ -84,3 +84,4 @@ jobs:
         with:
           name: libcrispasr-windows-x86_64-vulkan
           path: release/libcrispasr-windows-x86_64-vulkan.tar.gz
+          retention-days: 1
