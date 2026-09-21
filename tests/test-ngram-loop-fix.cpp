@@ -10,6 +10,7 @@
 
 #include "core/ngram_loop_fix.h"
 
+#include <clocale>
 #include <string>
 #include <vector>
 
@@ -84,7 +85,27 @@ TEST_CASE("edge cases are safe", "[ngram-loop]") {
     REQUIRE(fix_loops("word") == "word");
     // Whitespace is normalised to single spaces on rejoin.
     REQUIRE(fix_loops("  a   b  ") == "a b");
+    REQUIRE(fix_loops(" \t\r\n\f\v") == "");
+    REQUIRE(fix_loops("\ta\nb\rc\fd\ve ") == "a b c d e");
 }
+
+#ifdef _WIN32
+TEST_CASE("Windows locale cannot split UTF-8 characters", "[ngram-loop]") {
+    const std::string previous_locale = std::setlocale(LC_CTYPE, nullptr);
+    REQUIRE(std::setlocale(LC_CTYPE, "English_United States.1252") != nullptr);
+
+    // Captured R2T2 callback text was valid before cleanup, which deleted A0
+    // from C3 A0 (a-grave) under this Windows locale and crashed the caller.
+    const std::string french = "Voil\xc3\xa0 donc normalement|";
+    CHECK(fix_loops(french) == french);
+    // The same A0 byte occurs in the UTF-8 encoding of Chinese 'ni'.
+    const std::string chinese = "\xe4\xbd\xa0\xe5\xa5\xbd";
+    CHECK(fix_loops(chinese) == chinese);
+    CHECK(fix_loops("\ta\nb\rc\fd\ve ") == "a b c d e");
+
+    REQUIRE(std::setlocale(LC_CTYPE, previous_locale.c_str()) != nullptr);
+}
+#endif
 
 // issue #218 follow-up (AppleSheeple, 2026-07-09): fix_loops() cleans the
 // flat `seg.text`, but backends build `seg.words`/tokens independently from

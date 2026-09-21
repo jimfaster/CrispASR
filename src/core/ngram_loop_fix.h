@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include <cctype>
 #include <cstdlib>
 #include <string>
 #include <vector>
@@ -66,19 +65,15 @@ inline std::vector<std::string> collapse(const std::vector<std::string>& w, int 
     return out;
 }
 
-// Split `text` on whitespace into words.
+// Split on ASCII whitespace, never on individual bytes inside UTF-8 characters.
 inline std::vector<std::string> split_words(const std::string& text) {
+    constexpr char whitespace[] = " \t\n\r\f\v";
     std::vector<std::string> words;
-    size_t i = 0;
-    while (i < text.size()) {
-        while (i < text.size() && std::isspace((unsigned char)text[i]))
-            i++;
-        size_t j = i;
-        while (j < text.size() && !std::isspace((unsigned char)text[j]))
-            j++;
-        if (j > i)
-            words.push_back(text.substr(i, j - i));
-        i = j;
+    size_t i = text.find_first_not_of(whitespace);
+    while (i != std::string::npos) {
+        const size_t j = text.find_first_of(whitespace, i);
+        words.push_back(text.substr(i, j - i));
+        i = text.find_first_not_of(whitespace, j);
     }
     return words;
 }

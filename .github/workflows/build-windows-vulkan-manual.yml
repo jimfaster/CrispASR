@@ -33,14 +33,19 @@ jobs:
           cmake -S . -B build-libs ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DBUILD_SHARED_LIBS=ON ^
-            -DCRISPASR_BUILD_TESTS=OFF ^
-            -DCRISPASR_BUILD_EXAMPLES=OFF ^
+            -DCRISPASR_BUILD_TESTS=ON ^
+            -DCRISPASR_BUILD_EXAMPLES=ON ^
             -DCRISPASR_BUILD_SERVER=OFF ^
             -DGGML_VULKAN=ON ^
             -DGGML_CUDA=OFF ^
             -DGGML_NATIVE=OFF ^
             -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON ^
             -DCRISPASR_OPUS_FETCH=ON
+          if errorlevel 1 exit /b 1
+          cmake --build build-libs --config Release -j %NUMBER_OF_PROCESSORS% --target test-ngram-loop-fix
+          if errorlevel 1 exit /b 1
+          build-libs\bin\Release\test-ngram-loop-fix.exe "[ngram-loop]"
+          if errorlevel 1 exit /b 1
           cmake --build build-libs --config Release -j %NUMBER_OF_PROCESSORS% --target crispasr-lib
 
       - name: Package
