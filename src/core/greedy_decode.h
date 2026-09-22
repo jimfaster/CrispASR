@@ -69,7 +69,8 @@ namespace core_greedy_decode {
 
 struct Config {
     int max_new_tokens = 512; // hard cap on generated tokens
-    int eos_id = 2;           // stop as soon as this token is produced
+    int eos_id = 2;           // legacy single-EOS field; used iff eos_ids is empty
+    std::vector<int> eos_ids; // any matching token stops generation
     int vocab_size = 0;       // required — use the value from prefill
 
     // Sampling knobs. temperature <= 0 gives pure argmax (the historical
@@ -80,6 +81,11 @@ struct Config {
     float temperature = 0.0f;
     float frequency_penalty = 0.0f; // 0 = disabled; subtracts penalty * generated count
     uint64_t seed = 0;
+
+    bool is_eos(int token_id) const {
+        return eos_ids.empty() ? token_id == eos_id
+                               : std::find(eos_ids.begin(), eos_ids.end(), token_id) != eos_ids.end();
+    }
 };
 
 // Greedy argmax over a vocab-sized float logit vector.
@@ -207,7 +213,7 @@ std::vector<int32_t> run(Ctx* ctx, int32_t first_token, int initial_n_past, Embe
     gen.push_back(first_token);
 
     // Early-exit when the prefill already predicted EOS.
-    if (first_token == cfg.eos_id)
+    if (cfg.is_eos(first_token))
         return gen;
 
     // RNG state is only touched on the sampling path. Seeding is cheap
@@ -220,7 +226,7 @@ std::vector<int32_t> run(Ctx* ctx, int32_t first_token, int initial_n_past, Embe
     count_generated_token(token_counts, first_token);
 
     int n_past = initial_n_past;
-    while ((int)gen.size() < cfg.max_new_tokens && gen.back() != cfg.eos_id) {
+    while ((int)gen.size() < cfg.max_new_tokens && !cfg.is_eos(gen.back())) {
         const int step = (int)gen.size() - 1; // 0 = first decoded step
         int32_t last = gen.back();
 
@@ -275,7 +281,7 @@ inline Result run_with_probs(Ctx* ctx, int32_t first_token, float first_prob, in
     r.tokens.push_back(first_token);
     r.probs.push_back(first_prob);
 
-    if (first_token == cfg.eos_id)
+    if (cfg.is_eos(first_token))
         return r;
 
     std::mt19937_64 rng(cfg.seed != 0 ? cfg.seed : (uint64_t)std::random_device{}());
@@ -285,7 +291,7 @@ inline Result run_with_probs(Ctx* ctx, int32_t first_token, float first_prob, in
     count_generated_token(token_counts, first_token);
 
     int n_past = initial_n_past;
-    while ((int)r.tokens.size() < cfg.max_new_tokens && r.tokens.back() != cfg.eos_id) {
+    while ((int)r.tokens.size() < cfg.max_new_tokens && !cfg.is_eos(r.tokens.back())) {
         int32_t last = r.tokens.back();
         float* emb = embed_fn(ctx, &last, 1);
         if (!emb)
@@ -329,7 +335,7 @@ inline Result run_with_probs(Ctx* ctx, int32_t first_token, float first_prob, in
     r.tokens.push_back(first_token);
     r.probs.push_back(first_prob);
 
-    if (first_token == cfg.eos_id)
+    if (cfg.is_eos(first_token))
         return r;
 
     std::mt19937_64 rng(cfg.seed != 0 ? cfg.seed : (uint64_t)std::random_device{}());
@@ -339,7 +345,7 @@ inline Result run_with_probs(Ctx* ctx, int32_t first_token, float first_prob, in
     count_generated_token(token_counts, first_token);
 
     int n_past = initial_n_past;
-    while ((int)r.tokens.size() < cfg.max_new_tokens && r.tokens.back() != cfg.eos_id) {
+    while ((int)r.tokens.size() < cfg.max_new_tokens && !cfg.is_eos(r.tokens.back())) {
         const int step = (int)r.tokens.size() - 1;
         int32_t last = r.tokens.back();
         float* emb = embed_fn(ctx, &last, 1);
@@ -391,7 +397,7 @@ inline Result run_with_probs_cb(Ctx* ctx, int32_t first_token, float first_prob,
     // Call the callback for the first token
     on_token(first_token, first_prob);
 
-    if (first_token == cfg.eos_id)
+    if (cfg.is_eos(first_token))
         return r;
 
     std::mt19937_64 rng(cfg.seed != 0 ? cfg.seed : (uint64_t)std::random_device{}());
@@ -401,7 +407,7 @@ inline Result run_with_probs_cb(Ctx* ctx, int32_t first_token, float first_prob,
     count_generated_token(token_counts, first_token);
 
     int n_past = initial_n_past;
-    while ((int)r.tokens.size() < cfg.max_new_tokens && r.tokens.back() != cfg.eos_id) {
+    while ((int)r.tokens.size() < cfg.max_new_tokens && !cfg.is_eos(r.tokens.back())) {
         int32_t last = r.tokens.back();
         float* emb = embed_fn(ctx, &last, 1);
         if (!emb)
@@ -450,7 +456,7 @@ inline Result run_with_probs_cb(Ctx* ctx, int32_t first_token, float first_prob,
 
     on_token(first_token, first_prob);
 
-    if (first_token == cfg.eos_id)
+    if (cfg.is_eos(first_token))
         return r;
 
     std::mt19937_64 rng(cfg.seed != 0 ? cfg.seed : (uint64_t)std::random_device{}());
@@ -460,7 +466,7 @@ inline Result run_with_probs_cb(Ctx* ctx, int32_t first_token, float first_prob,
     count_generated_token(token_counts, first_token);
 
     int n_past = initial_n_past;
-    while ((int)r.tokens.size() < cfg.max_new_tokens && r.tokens.back() != cfg.eos_id) {
+    while ((int)r.tokens.size() < cfg.max_new_tokens && !cfg.is_eos(r.tokens.back())) {
         const int step = (int)r.tokens.size() - 1;
         int32_t last = r.tokens.back();
         float* emb = embed_fn(ctx, &last, 1);

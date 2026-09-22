@@ -46,6 +46,10 @@ jobs:
           if errorlevel 1 exit /b 1
           build-libs\bin\Release\test-ngram-loop-fix.exe "[ngram-loop]"
           if errorlevel 1 exit /b 1
+          cmake --build build-libs --config Release -j %NUMBER_OF_PROCESSORS% --target test-core-decode
+          if errorlevel 1 exit /b 1
+          build-libs\bin\Release\test-core-decode.exe "[decode]"
+          if errorlevel 1 exit /b 1
           cmake --build build-libs --config Release -j %NUMBER_OF_PROCESSORS% --target crispasr-lib
 
       - name: Package

@@ -124,6 +124,21 @@ TEST_CASE("greedy_decode: run_with_probs produces correct sequence", "[unit][dec
     REQUIRE(found_eos);
 }
 
+TEST_CASE("greedy_decode: multi-EOS stops on any configured token", "[unit][decode]") {
+    MockCtx ctx;
+    ctx.eos = 6;
+    core_greedy_decode::Config cfg;
+    cfg.max_new_tokens = 10;
+    cfg.eos_id = 5;
+    cfg.eos_ids = {5, 6};
+    cfg.vocab_size = 8;
+
+    auto result = core_greedy_decode::run_with_probs(&ctx, 3, 1.0f, 0, mock_embed, mock_llm, cfg);
+
+    REQUIRE(result.tokens.back() == 6);
+    REQUIRE(result.tokens.size() == 5);
+}
+
 TEST_CASE("greedy_decode: run_with_probs_cb streams tokens", "[unit][decode]") {
     MockCtx ctx;
     core_greedy_decode::Config cfg;

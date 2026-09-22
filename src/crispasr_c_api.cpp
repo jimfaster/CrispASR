@@ -5886,12 +5886,15 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
             return nullptr;
         }
 
-        int eos_id = -1;
-        int n_eos = 0;
-        int32_t* eos_arr = qwen3_asr_tokenize(s->qwen3_ctx, "<|im_end|>", &n_eos);
-        if (eos_arr && n_eos >= 1)
-            eos_id = eos_arr[0];
-        std::free(eos_arr);
+        std::vector<int> eos_ids;
+        for (const char* marker : {"<|im_end|>", "<|endoftext|>"}) {
+            int n_eos = 0;
+            int32_t* eos_arr = qwen3_asr_tokenize(s->qwen3_ctx, marker, &n_eos);
+            if (eos_arr && n_eos >= 1 && std::find(eos_ids.begin(), eos_ids.end(), eos_arr[0]) == eos_ids.end())
+                eos_ids.push_back(eos_arr[0]);
+            std::free(eos_arr);
+        }
+        const int eos_id = eos_ids.empty() ? -1 : eos_ids.front();
 
         const int last_off = (n_t - 1) * vocab;
         const int prompt_len_q3 = (int)ids.size();
@@ -5910,6 +5913,7 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
             core_beam_decode::Config bcfg;
             bcfg.max_new_tokens = q3_max_new;
             bcfg.eos_id = eos_id;
+            bcfg.eos_ids = eos_ids;
             bcfg.vocab_size = vocab;
             bcfg.beam_size = s->beam_size;
             bcfg.prompt_len = prompt_len_q3;
@@ -5924,6 +5928,7 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
             core_greedy_decode::Config dec_cfg;
             dec_cfg.max_new_tokens = q3_max_new;
             dec_cfg.eos_id = eos_id;
+            dec_cfg.eos_ids = eos_ids;
             dec_cfg.vocab_size = vocab;
             dec_cfg.frequency_penalty = s->frequency_penalty;
             dec = core_greedy_decode::run_with_probs(s->qwen3_ctx, first_tok, first_p, prompt_len_q3,
@@ -5953,7 +5958,7 @@ static crispasr_session_result* transcribe_single(crispasr_session* s, const flo
         };
         for (size_t i = 0; i < dec.tokens.size(); i++) {
             const int32_t id = dec.tokens[i];
-            if (id == eos_id)
+            if (std::find(eos_ids.begin(), eos_ids.end(), id) != eos_ids.end())
                 break;
             const char* raw_piece = qwen3_asr_token_text(s->qwen3_ctx, id);
             if (!raw_piece || !*raw_piece)
