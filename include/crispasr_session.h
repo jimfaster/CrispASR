@@ -32,6 +32,7 @@ extern "C" {
 struct whisper_context;
 struct whisper_context_params;
 struct whisper_full_params;
+struct whisper_state;
 
 struct crispasr_align_result;
 typedef struct crispasr_align_result crispasr_align_result;
@@ -164,6 +165,13 @@ CRISPASR_SESSION_API void crispasr_params_set_vad_speech_pad_ms(whisper_full_par
 CRISPASR_SESSION_API void crispasr_params_set_abort_callback(whisper_full_params* p,
                                                              crispasr_abort_callback abort_callback,
                                                              void* abort_callback_user_data);
+typedef void (*crispasr_whisper_progress_callback)(whisper_context* ctx, struct whisper_state* state, int progress,
+                                                   void* user_data);
+// Uses Whisper's existing decode progress (0-100, after optional VAD).
+// Called synchronously; keep the callback and user_data alive until whisper_full returns.
+CRISPASR_SESSION_API void crispasr_params_set_progress_callback(whisper_full_params* p,
+                                                                crispasr_whisper_progress_callback callback,
+                                                                void* user_data);
 CRISPASR_SESSION_API void crispasr_params_set_tdrz(whisper_full_params* p, int v);
 CRISPASR_SESSION_API void crispasr_ctx_params_set_gpu(whisper_context_params* p, int enabled, int gpu_device);
 CRISPASR_SESSION_API void crispasr_ctx_params_set_dtw(whisper_context_params* p, bool enable, int aheads_preset,
@@ -235,6 +243,12 @@ CRISPASR_SESSION_API void crispasr_cohere_free(cohere_context* ctx);
 CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_abort(
     cohere_context* ctx, const float* pcm, int n_samples, const char* language,
     crispasr_abort_callback abort_callback, void* abort_callback_user_data);
+// For audio longer than 30 seconds, reports cumulative input samples after each
+// finished section. Short calls have no intermediate callback. Called synchronously.
+CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_progress(
+    cohere_context* ctx, const float* pcm, int n_samples, const char* language,
+    crispasr_abort_callback abort_callback, void* abort_callback_user_data,
+    crispasr_progress_callback progress_callback, void* progress_callback_user_data);
 CRISPASR_SESSION_API const char* crispasr_cohere_backend_name(cohere_context* ctx);
 CRISPASR_SESSION_API const char* crispasr_cohere_result_text(cohere_result* r);
 CRISPASR_SESSION_API int crispasr_cohere_result_n_tokens(cohere_result* r);

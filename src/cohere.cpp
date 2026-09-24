@@ -2192,8 +2192,9 @@ static void cohere_fold_batchnorm(cohere_model& model, int verbosity) {
     COHERE_VLOG(verbosity, "cohere: BN folded into conv_dw weights for %d layers\n", model.hparams.enc_n_layers);
 }
 
-struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const float* samples, int n_samples,
-                                           const char* lang, int64_t t_offset_cs) {
+struct cohere_result* cohere_transcribe_ex_with_progress(struct cohere_context* ctx, const float* samples,
+                                                         int n_samples, const char* lang, int64_t t_offset_cs,
+                                                         cohere_progress_callback callback, void* user_data) {
     if (!ctx || !samples || n_samples <= 0 || cohere_should_abort(ctx))
         return nullptr;
     const auto& hp = ctx->model.hparams;
@@ -2298,6 +2299,8 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
                     cohere_result_free(full);
                     return nullptr;
                 }
+                if (callback)
+                    callback(chunk_end, n_samples, user_data);
             }
             return full;
         }
@@ -3243,6 +3246,11 @@ struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const flo
     }
     memcpy(res->text, full_text.c_str(), full_text.size() + 1);
     return res;
+}
+
+struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const float* samples, int n_samples,
+                                           const char* lang, int64_t t_offset_cs) {
+    return cohere_transcribe_ex_with_progress(ctx, samples, n_samples, lang, t_offset_cs, nullptr, nullptr);
 }
 
 void cohere_result_free(struct cohere_result* r) {
