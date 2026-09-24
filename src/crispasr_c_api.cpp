@@ -532,6 +532,13 @@ CA_EXPORT void crispasr_params_set_abort_callback(whisper_full_params* p, crispa
         p->abort_callback_user_data = abort_callback_user_data;
     }
 }
+CA_EXPORT void crispasr_params_set_progress_callback(whisper_full_params* p,
+                                                     crispasr_whisper_progress_callback callback, void* user_data) {
+    if (p) {
+        p->progress_callback = callback;
+        p->progress_callback_user_data = user_data;
+    }
+}
 
 // tinydiarize (`tdrz`) — whisper's own experimental speaker-turn marker
 // injection. Requires a whisper *.en.tdrz finetune. Emits `[SPEAKER_TURN]`
@@ -1406,10 +1413,19 @@ CA_EXPORT void crispasr_cohere_free(cohere_context* ctx) {
 CA_EXPORT cohere_result* crispasr_cohere_transcribe_with_abort(
     cohere_context* ctx, const float* pcm, int n_samples, const char* language,
     crispasr_abort_callback abort_callback, void* abort_callback_user_data) {
+    return crispasr_cohere_transcribe_with_progress(ctx, pcm, n_samples, language, abort_callback,
+                                                   abort_callback_user_data, nullptr, nullptr);
+}
+
+CA_EXPORT cohere_result* crispasr_cohere_transcribe_with_progress(
+    cohere_context* ctx, const float* pcm, int n_samples, const char* language,
+    crispasr_abort_callback abort_callback, void* abort_callback_user_data,
+    crispasr_progress_callback progress_callback, void* progress_callback_user_data) {
     if (!ctx || !pcm || n_samples <= 0 || !language || !language[0])
         return nullptr;
     cohere_set_abort_callback(ctx, abort_callback, abort_callback_user_data);
-    cohere_result* result = cohere_transcribe_ex(ctx, pcm, n_samples, language, 0);
+    cohere_result* result = cohere_transcribe_ex_with_progress(ctx, pcm, n_samples, language, 0,
+                                                              progress_callback, progress_callback_user_data);
     cohere_set_abort_callback(ctx, nullptr, nullptr);
     return result;
 }

@@ -88,6 +88,10 @@ void cohere_result_free(struct cohere_result* r);
 // Returns NULL on failure. Free result with cohere_result_free().
 struct cohere_result* cohere_transcribe_ex(struct cohere_context* ctx, const float* samples, int n_samples,
                                            const char* lang, int64_t t_offset_cs);
+typedef void (*cohere_progress_callback)(int processed, int total, void* user_data);
+struct cohere_result* cohere_transcribe_ex_with_progress(struct cohere_context* ctx, const float* samples,
+                                                         int n_samples, const char* lang, int64_t t_offset_cs,
+                                                         cohere_progress_callback callback, void* user_data);
 
 // ---- Stage-level entry points (for crispasr-diff testing) ----
 // Returns malloc'd F32 buffers the caller must free(). NULL on failure.
