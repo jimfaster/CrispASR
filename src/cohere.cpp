@@ -1962,7 +1962,7 @@ struct cohere_context* cohere_init_from_file(const char* path_model, struct cohe
     }
 
     {
-        const char* dev_env = crispasr_env::get("CRISPASR_COHERE_DEVICE");
+        const char* dev_env = params.use_gpu ? crispasr_env::get("CRISPASR_COHERE_DEVICE") : nullptr;
         if (dev_env && strlen(dev_env) > 0) {
             ctx->ggml_backend = ggml_backend_init_by_name(dev_env, nullptr);
             if (!ctx->ggml_backend) {
