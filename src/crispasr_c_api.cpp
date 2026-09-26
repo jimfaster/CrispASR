@@ -1313,11 +1313,17 @@ CA_EXPORT void crispasr_stream_set_live_decode(crispasr_stream* s, int enabled) 
 #ifdef CA_HAVE_PARAKEET
 
 CA_EXPORT parakeet_context* crispasr_parakeet_init(const char* model_path, int n_threads, int use_flash) {
+    return crispasr_parakeet_init_with_gpu(model_path, n_threads, use_flash, 1);
+}
+
+CA_EXPORT parakeet_context* crispasr_parakeet_init_with_gpu(const char* model_path, int n_threads, int use_flash,
+                                                             int use_gpu) {
     if (!model_path)
         return nullptr;
     parakeet_context_params p = parakeet_context_default_params();
     p.n_threads = n_threads > 0 ? n_threads : 4;
     p.use_flash = use_flash != 0;
+    p.use_gpu = use_gpu != 0;
     p.verbosity = 0;
     return parakeet_init_from_file(model_path, p);
 }
@@ -1396,11 +1402,17 @@ CA_EXPORT void crispasr_parakeet_result_free(parakeet_result* r) {
 #ifdef CA_HAVE_COHERE
 
 CA_EXPORT cohere_context* crispasr_cohere_init(const char* model_path, int n_threads, int use_flash) {
+    return crispasr_cohere_init_with_gpu(model_path, n_threads, use_flash, 1);
+}
+
+CA_EXPORT cohere_context* crispasr_cohere_init_with_gpu(const char* model_path, int n_threads, int use_flash,
+                                                         int use_gpu) {
     if (!model_path)
         return nullptr;
     cohere_context_params p = cohere_context_default_params();
     p.n_threads = n_threads > 0 ? n_threads : 4;
     p.use_flash = use_flash != 0;
+    p.use_gpu = use_gpu != 0;
     p.verbosity = 0;
     return cohere_init_from_file(model_path, p);
 }

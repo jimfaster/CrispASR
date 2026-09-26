@@ -220,6 +220,8 @@ CRISPASR_SESSION_API int crispasr_stream_get_text(crispasr_stream* s, char* out_
 CRISPASR_SESSION_API int crispasr_stream_flush(crispasr_stream* s);
 CRISPASR_SESSION_API void crispasr_stream_set_live_decode(crispasr_stream* s, int enabled);
 CRISPASR_SESSION_API parakeet_context* crispasr_parakeet_init(const char* model_path, int n_threads, int use_flash);
+CRISPASR_SESSION_API parakeet_context* crispasr_parakeet_init_with_gpu(const char* model_path, int n_threads,
+                                                                      int use_flash, int use_gpu);
 CRISPASR_SESSION_API void crispasr_parakeet_free(parakeet_context* ctx);
 CRISPASR_SESSION_API parakeet_result* crispasr_parakeet_transcribe(parakeet_context* ctx, const float* pcm,
                                                                    int n_samples, int64_t t_offset_cs);
@@ -239,6 +241,8 @@ CRISPASR_SESSION_API int64_t crispasr_parakeet_result_token_t1(parakeet_result* 
 CRISPASR_SESSION_API float crispasr_parakeet_result_token_p(parakeet_result* r, int i);
 CRISPASR_SESSION_API void crispasr_parakeet_result_free(parakeet_result* r);
 CRISPASR_SESSION_API cohere_context* crispasr_cohere_init(const char* model_path, int n_threads, int use_flash);
+CRISPASR_SESSION_API cohere_context* crispasr_cohere_init_with_gpu(const char* model_path, int n_threads,
+                                                                  int use_flash, int use_gpu);
 CRISPASR_SESSION_API void crispasr_cohere_free(cohere_context* ctx);
 CRISPASR_SESSION_API cohere_result* crispasr_cohere_transcribe_with_abort(
     cohere_context* ctx, const float* pcm, int n_samples, const char* language,
