@@ -2211,6 +2211,20 @@ struct cohere_result* cohere_transcribe_ex_with_progress(struct cohere_context* 
     COHERE_VLOG2(vb, "cohere: transcribe started   n_samples=%d  audio=%.2fs\n", n_samples,
                  (double)n_samples / hp.sample_rate);
 
+    if (audio_chunking::is_digitally_silent(samples, (size_t)n_samples)) {
+        COHERE_VLOG(vb, "cohere: %.2fs of digital silence, returning an empty transcript\n",
+                    (double)n_samples / hp.sample_rate);
+        cohere_result* empty = (cohere_result*)calloc(1, sizeof(cohere_result));
+        if (!empty)
+            return nullptr;
+        empty->text = (char*)calloc(1, 1);
+        if (!empty->text) {
+            free(empty);
+            return nullptr;
+        }
+        return empty;
+    }
+
     // --- Long-audio chunking: encode AND decode each <=30s window independently ---
     //
     // The previous approach assembled a single giant cross-KV for all chunks and ran

@@ -92,4 +92,20 @@ inline std::vector<std::pair<size_t, size_t>> split_at_energy_minima(const float
     return out;
 }
 
+inline float peak_abs(const float* samples, size_t n_samples) {
+    float peak = 0.0f;
+    for (size_t i = 0; i < n_samples; i++) {
+        const float a = samples[i] < 0.0f ? -samples[i] : samples[i];
+        if (a > peak)
+            peak = a;
+    }
+    return peak;
+}
+
+inline bool is_digitally_silent(const float* samples, size_t n_samples, float eps = 1e-5f) {
+    if (n_samples == 0)
+        return true;
+    return peak_abs(samples, n_samples) < eps;
+}
+
 } // namespace audio_chunking
