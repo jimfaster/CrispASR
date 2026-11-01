@@ -3219,11 +3219,6 @@ extern "C" const char* parakeet_backend_name(struct parakeet_context* ctx) {
     return ctx && ctx->backend ? ggml_backend_name(ctx->backend) : nullptr;
 }
 
-// Internal C++ entry point for tests — declared in parakeet.h via a different
-// linkage section to avoid polluting the public C API.
-extern std::vector<float> parakeet_encode_mel(parakeet_context* ctx, const float* mel, int n_mels, int T_mel,
-                                              int* out_T_enc);
-
 // ---- Stage-level entry points for crispasr-diff ----
 
 extern "C" void parakeet_set_temperature(struct parakeet_context* ctx, float temperature, uint64_t seed) {
