@@ -97,6 +97,15 @@ struct parakeet_result* parakeet_transcribe_chunked(struct parakeet_context* ctx
 struct parakeet_result* parakeet_transcribe_streamed(struct parakeet_context* ctx, const float* samples, int n_samples,
                                                      int64_t t_offset_cs, int chunk_seconds, int overlap_seconds);
 
+// Live writing for models read from a stt.* file that are trained with chunked limited attention.
+// Lengths are in milliseconds, multiples of one encoder frame; 0 picks 70, 13 and 13 frames.
+// Returns NULL when the model does not support it.
+struct parakeet_live;
+struct parakeet_live* parakeet_live_begin(struct parakeet_context* ctx, int left_ms, int chunk_ms, int right_ms);
+int parakeet_live_feed(struct parakeet_live* live, const float* samples, int n_samples);
+struct parakeet_result* parakeet_live_finish(struct parakeet_live* live);
+void parakeet_live_free(struct parakeet_live* live);
+
 // Vocabulary helpers
 int parakeet_n_vocab(struct parakeet_context* ctx);
 // Issue #257: 1 iff the model's vocab is predominantly Japanese script (JA-only

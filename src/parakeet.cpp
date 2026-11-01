@@ -924,7 +924,12 @@ static void parakeet_fold_batchnorm(parakeet_model& model, ggml_backend_t backen
 static const float kLayerNormEps = 1e-5f;
 static const float kBatchNormEps = 1e-5f;
 
-static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_mel) {
+struct parakeet_live_geometry {
+    int left, chunk, right, valid;
+};
+
+static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_mel,
+                                                 const parakeet_live_geometry* live_geom = nullptr) {
     const auto& m = ctx->model;
     const auto& hp = m.hparams;
     const int n_mels = (int)hp.n_mels;
@@ -973,11 +978,19 @@ static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_me
     // TRUE windowed attention: build the O(T·window) band mask instead of the T×T
     // full mask when the gate is on and the clip is long enough to benefit.
     const bool use_windowed_attn =
-        core_conformer::fc_windowed_attn() &&
+        !live_geom && core_conformer::fc_windowed_attn() &&
         core_conformer::fc_window_attn_applicable(T, hp.att_context_left, hp.att_context_right);
     if (getenv("CRISPASR_FC_MEM_DEBUG"))
         fprintf(stderr, "[fc-encode] T=%d windowed=%d local=%d\n", T, (int)use_windowed_attn, (int)use_local_attn);
-    if (use_windowed_attn) {
+    ggml_tensor* live_time_mask = nullptr;
+    if (live_geom) {
+        local_mask = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, T, T);
+        ggml_set_name(local_mask, "live_attn_mask");
+        ggml_set_input(local_mask);
+        live_time_mask = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, 1, T);
+        ggml_set_name(live_time_mask, "live_time_mask");
+        ggml_set_input(live_time_mask);
+    } else if (use_windowed_attn) {
         const int BS = core_conformer::fc_window_block_size(hp.att_context_left, hp.att_context_right);
         const int NB = (T + BS - 1) / BS;
         window_band_mask = ggml_new_tensor_3d(ctx0, GGML_TYPE_F32, 3 * BS, BS, NB);
@@ -997,7 +1010,8 @@ static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_me
     bp.manual_attn = core_conformer::fc_gpu_manual_attn(ctx->backend);
     bp.split_norm = core_conformer::fc_backend_is_vulkan(ctx->backend);
     for (uint32_t il = 0; il < hp.n_layers; il++) {
-        cur = core_conformer::build_block(ctx0, cur, pos_enc, T, m.enc[il], bp, local_mask, nullptr, window_band_mask);
+        cur = core_conformer::build_block(ctx0, cur, pos_enc, T, m.enc[il], bp, local_mask, live_time_mask,
+                                          window_band_mask);
     }
 
     ggml_set_name(cur, "enc_out");
@@ -1012,7 +1026,7 @@ static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_me
 // Caller computes T_enc as ceil(T_mel / subsampling_factor) (approximately —
 // the actual value depends on the conv arithmetic and is reported back).
 static std::vector<float> parakeet_encode_mel(parakeet_context* ctx, const float* mel, int n_mels, int T_mel,
-                                              int* out_T_enc) {
+                                              int* out_T_enc, const parakeet_live_geometry* live_geom = nullptr) {
     if (n_mels != (int)ctx->model.hparams.n_mels) {
         fprintf(stderr, "parakeet: mel feature mismatch (%d vs %d)\n", n_mels, (int)ctx->model.hparams.n_mels);
         return {};
@@ -1057,7 +1071,7 @@ static std::vector<float> parakeet_encode_mel(parakeet_context* ctx, const float
     // Enable PARAKEET_ENC_PROBE to reproduce the measurement and the 2nd-reuse
     // corruption (reuse windows collapse enc std 0.020 → 0.008). See issue #208.
     ggml_cgraph* gf;
-    const bool use_enc_cache = getenv("CRISPASR_PARAKEET_ENC_CACHE") != nullptr;
+    const bool use_enc_cache = !live_geom && getenv("CRISPASR_PARAKEET_ENC_CACHE") != nullptr;
     const bool probe_time = crispasr_env::get("CRISPASR_PARAKEET_ENC_PROBE") != nullptr;
     bool enc_cache_hit = false;
     int64_t t_build0 = probe_time ? ggml_time_us() : 0;
@@ -1072,7 +1086,7 @@ static std::vector<float> parakeet_encode_mel(parakeet_context* ctx, const float
         ctx->cached_enc_gf = gf;
         ctx->cached_enc_T_mel = T_mel;
     } else {
-        gf = parakeet_build_graph_encoder(ctx, T_mel);
+        gf = parakeet_build_graph_encoder(ctx, T_mel, live_geom);
     }
     int64_t t_build_us = probe_time ? ggml_time_us() - t_build0 : 0;
 
@@ -1111,6 +1125,31 @@ static std::vector<float> parakeet_encode_mel(parakeet_context* ctx, const float
         auto bm = core_conformer::make_window_band_mask(T_enc, hp.att_context_left, hp.att_context_right,
                                                         (int)hp.global_tokens, BS);
         ggml_backend_tensor_set(band_mask_in, bm.data(), 0, bm.size() * sizeof(float));
+    }
+
+    if (live_geom) {
+        const int C = live_geom->chunk;
+        const int P = std::min(live_geom->valid, T_enc);
+        std::vector<float> attn((size_t)T_enc * T_enc, -INFINITY);
+        std::vector<float> keep((size_t)T_enc, 0.0f);
+        for (int q = 0; q < T_enc; q++) {
+            const int block = (q / C) * C;
+            int lo = std::max(block - live_geom->left, 0);
+            int hi = std::min(block + C - 1 + live_geom->right, P - 1);
+            // A padded row reads the valid frames so its softmax stays finite; the time mask then zeroes it.
+            if (q >= P) {
+                lo = 0;
+                hi = P - 1;
+            } else {
+                keep[q] = 1.0f;
+            }
+            for (int k = lo; k <= hi; k++)
+                attn[(size_t)q * T_enc + k] = 0.0f;
+        }
+        ggml_backend_tensor_set(ggml_graph_get_tensor(gf, "live_attn_mask"), attn.data(), 0,
+                                attn.size() * sizeof(float));
+        ggml_backend_tensor_set(ggml_graph_get_tensor(gf, "live_time_mask"), keep.data(), 0,
+                                keep.size() * sizeof(float));
     }
 
     // Compute
@@ -2852,35 +2891,52 @@ static void parakeet_project_enc(parakeet_context* ctx, const float* enc, int T_
     }
 }
 
-static std::vector<parakeet_emitted_token> parakeet_rnnt_decode(parakeet_context* ctx, const float* enc, int T_enc,
-                                                                int d_model) {
+struct parakeet_rnnt_stream {
+    core_rnnt_ggml::Decoder gdec;
+    bool ggml_dec = false;
+    parakeet_lstm_state state;
+    std::vector<float> pred_out;
+    core_context_bias::MatchState hw_state;
+    std::vector<parakeet_emitted_token> emitted;
+    int frame_offset = 0;
+};
+
+static void parakeet_rnnt_stream_init(parakeet_context* ctx, parakeet_rnnt_stream& s) {
     parakeet_init_pred_weights(ctx);
     parakeet_init_joint_weights(ctx);
 
-    const auto& hp = ctx->model.hparams;
-    const int blank_id = (int)hp.blank_id; // vocab_size
-    const int n_vocab_blk = blank_id + 1;  // vocab + blank
+    const int blank_id = (int)ctx->model.hparams.blank_id; // vocab_size
+    const int n_vocab_blk = blank_id + 1;                  // vocab + blank
+    s.ggml_dec = parakeet_init_ggml_decoder(ctx, s.gdec);
+
+    if (ctx->joint_w.vocab_total != n_vocab_blk) {
+        fprintf(stderr, "parakeet: RNNT joint vocab_total mismatch (%d vs expected %d)\n", ctx->joint_w.vocab_total,
+                n_vocab_blk);
+    }
+
+    s.emitted.reserve(256);
+    lstm_init_state(s.state, ctx->pred_w.H);
+    if (s.ggml_dec)
+        parakeet_predictor_step_ggml(ctx, s.gdec, blank_id, s.state, s.pred_out);
+    else
+        predictor_step(ctx->pred_w, blank_id, s.state, s.pred_out);
+}
+
+static void parakeet_rnnt_stream_decode(parakeet_context* ctx, parakeet_rnnt_stream& s, const float* enc, int T_enc,
+                                        int d_model) {
+    const int blank_id = (int)ctx->model.hparams.blank_id; // vocab_size
+    const int n_vocab_blk = blank_id + 1;                  // vocab + blank
     const int max_per_step = 10;
-    core_rnnt_ggml::Decoder gdec;
-    const bool ggml_dec = parakeet_init_ggml_decoder(ctx, gdec);
+    core_rnnt_ggml::Decoder& gdec = s.gdec;
+    const bool ggml_dec = s.ggml_dec;
+    parakeet_lstm_state& state = s.state;
+    std::vector<float>& pred_out = s.pred_out;
+    core_context_bias::MatchState& hw_state = s.hw_state;
+    std::vector<parakeet_emitted_token>& emitted = s.emitted;
 
     auto& W = ctx->pred_w;
     auto& J = ctx->joint_w;
-    if (J.vocab_total != n_vocab_blk) {
-        fprintf(stderr, "parakeet: RNNT joint vocab_total mismatch (%d vs expected %d)\n", J.vocab_total, n_vocab_blk);
-    }
 
-    std::vector<parakeet_emitted_token> emitted;
-    emitted.reserve(256);
-
-    parakeet_lstm_state state;
-    lstm_init_state(state, W.H);
-
-    std::vector<float> pred_out;
-    if (ggml_dec)
-        parakeet_predictor_step_ggml(ctx, gdec, blank_id, state, pred_out);
-    else
-        predictor_step(W, blank_id, state, pred_out);
     std::vector<float> proj_e(J.joint_hidden);
     std::vector<float> proj_all;
     if (gdec.active())
@@ -2888,7 +2944,6 @@ static std::vector<parakeet_emitted_token> parakeet_rnnt_decode(parakeet_context
     std::vector<float> logits(J.vocab_total);
 
     const bool has_hotwords = !ctx->hotword_trie.empty();
-    core_context_bias::MatchState hw_state;
 
     int t = 0;
     while (t < T_enc) {
@@ -2930,7 +2985,7 @@ static std::vector<parakeet_emitted_token> parakeet_rnnt_decode(parakeet_context
                 tok_p = sum > 0.0 ? (float)(1.0 / sum) : 0.0f;
             }
 
-            emitted.push_back({tok, t, t, tok_p});
+            emitted.push_back({tok, t + s.frame_offset, t + s.frame_offset, tok_p});
             if (has_hotwords)
                 core_context_bias::advance(ctx->hotword_trie, hw_state, tok);
             if (ggml_dec)
@@ -2943,8 +2998,15 @@ static std::vector<parakeet_emitted_token> parakeet_rnnt_decode(parakeet_context
         if (n_inner >= max_per_step)
             t++;
     }
+    s.frame_offset += T_enc;
+}
 
-    return emitted;
+static std::vector<parakeet_emitted_token> parakeet_rnnt_decode(parakeet_context* ctx, const float* enc, int T_enc,
+                                                                int d_model) {
+    parakeet_rnnt_stream s;
+    parakeet_rnnt_stream_init(ctx, s);
+    parakeet_rnnt_stream_decode(ctx, s, enc, T_enc, d_model);
+    return std::move(s.emitted);
 }
 
 // ===========================================================================
@@ -4152,6 +4214,39 @@ extern "C" struct parakeet_result* parakeet_transcribe_streamed(struct parakeet_
 
 // ---------------------------------------------------------------------------
 
+static parakeet_result* parakeet_build_result(parakeet_context* ctx, const std::vector<parakeet_emitted_token>& emitted,
+                                              int64_t t_offset_cs) {
+    auto* r = (parakeet_result*)calloc(1, sizeof(parakeet_result));
+    r->n_tokens = (int)emitted.size();
+    r->tokens = (parakeet_token_data*)calloc(r->n_tokens > 0 ? r->n_tokens : 1, sizeof(parakeet_token_data));
+    std::string text;
+    const int frame_dur_cs = (int)ctx->model.hparams.frame_dur_cs;
+    for (int i = 0; i < r->n_tokens; i++) {
+        const auto& e = emitted[i];
+        const std::string& piece =
+            (e.id >= 0 && e.id < (int)ctx->vocab.id_to_token.size()) ? ctx->vocab.id_to_token[e.id] : std::string("");
+        std::string vis = spiece_to_text(piece);
+
+        parakeet_token_data& td = r->tokens[i];
+        td.id = e.id;
+        td.t0 = t_offset_cs + (int64_t)e.t_start * frame_dur_cs;
+        td.t1 = t_offset_cs + (int64_t)e.t_end * frame_dur_cs;
+        td.p = e.p;
+        size_t n = std::min(vis.size(), sizeof(td.text) - 1);
+        memcpy(td.text, vis.data(), n);
+        td.text[n] = '\0';
+        text += vis;
+    }
+    // strip leading space
+    if (!text.empty() && text[0] == ' ')
+        text = text.substr(1);
+    r->text = strdup(text.c_str());
+
+    parakeet_group_words(r, frame_dur_cs);
+
+    return r;
+}
+
 extern "C" struct parakeet_result* parakeet_transcribe_ex(struct parakeet_context* ctx, const float* samples,
                                                            int n_samples, int64_t t_offset_cs) {
     if (!ctx || !samples || n_samples <= 0)
@@ -4226,35 +4321,126 @@ extern "C" struct parakeet_result* parakeet_transcribe_ex(struct parakeet_contex
                 use_beam ? " beam" : "", (int)emitted.size());
 
     // 4. Build result
-    auto* r = (parakeet_result*)calloc(1, sizeof(parakeet_result));
-    r->n_tokens = (int)emitted.size();
-    r->tokens = (parakeet_token_data*)calloc(r->n_tokens > 0 ? r->n_tokens : 1, sizeof(parakeet_token_data));
-    std::string text;
-    const int frame_dur_cs = (int)ctx->model.hparams.frame_dur_cs;
-    for (int i = 0; i < r->n_tokens; i++) {
-        const auto& e = emitted[i];
-        const std::string& piece =
-            (e.id >= 0 && e.id < (int)ctx->vocab.id_to_token.size()) ? ctx->vocab.id_to_token[e.id] : std::string("");
-        std::string vis = spiece_to_text(piece);
+    return parakeet_build_result(ctx, emitted, t_offset_cs);
+}
 
-        parakeet_token_data& td = r->tokens[i];
-        td.id = e.id;
-        td.t0 = t_offset_cs + (int64_t)e.t_start * frame_dur_cs;
-        td.t1 = t_offset_cs + (int64_t)e.t_end * frame_dur_cs;
-        td.p = e.p;
-        size_t n = std::min(vis.size(), sizeof(td.text) - 1);
-        memcpy(td.text, vis.data(), n);
-        td.text[n] = '\0';
-        text += vis;
+// Live writing for models trained with chunked limited attention: the whole-recording encoder runs on a
+// sliding window with an attention mask, and only the transducer state carries over between windows.
+struct parakeet_live {
+    parakeet_context* ctx = nullptr;
+    int left_frames = 0, chunk_frames = 0, right_frames = 0;
+    int samples_per_frame = 0;
+    int64_t samples_left = 0, samples_chunk = 0, samples_right = 0;
+    std::vector<float> pcm;
+    int64_t next_read = 0;
+    int64_t ctx_left = 0, ctx_chunk = 0, ctx_right = 0;
+    bool initialized = false;
+    parakeet_rnnt_stream decoder;
+};
+
+static bool parakeet_live_emit(parakeet_live* l, int64_t num_new, bool is_last, int64_t eos_pad) {
+    parakeet_context* ctx = l->ctx;
+    l->ctx_left += l->ctx_chunk;
+    l->ctx_chunk = 0;
+    l->ctx_right += num_new;
+    if (is_last) {
+        l->ctx_chunk = l->ctx_right;
+        l->ctx_right = 0;
+    } else {
+        l->ctx_chunk = l->samples_chunk;
+        l->ctx_right -= l->samples_chunk;
     }
-    // strip leading space
-    if (!text.empty() && text[0] == ' ')
-        text = text.substr(1);
-    r->text = strdup(text.c_str());
+    const int64_t over =
+        l->ctx_left + l->ctx_chunk + l->ctx_right - (l->samples_left + l->samples_chunk + l->samples_right);
+    l->ctx_left -= std::max<int64_t>(over, 0);
+    l->ctx_chunk += eos_pad;
 
-    parakeet_group_words(r, frame_dur_cs);
+    const int64_t total_now = l->ctx_left + l->ctx_chunk + l->ctx_right;
+    const int64_t start_abs = l->next_read + num_new + eos_pad - total_now;
+    std::vector<float> window((size_t)total_now, 0.0f);
+    for (int64_t i = 0; i < total_now; i++) {
+        const int64_t src = start_abs + i;
+        if (src >= 0 && src < (int64_t)l->pcm.size())
+            window[(size_t)i] = l->pcm[(size_t)src];
+    }
 
-    return r;
+    int T_mel = 0;
+    std::vector<float> mel = parakeet_compute_mel_impl(ctx, window.data(), (int)window.size(), T_mel);
+    if (mel.empty())
+        return false;
+
+    const parakeet_live_geometry geom = {l->left_frames, l->chunk_frames, l->right_frames,
+                                         (int)(total_now / l->samples_per_frame)};
+    int T_enc = 0;
+    std::vector<float> enc =
+        parakeet_encode_mel(ctx, mel.data(), (int)ctx->model.hparams.n_mels, T_mel, &T_enc, &geom);
+    if (enc.empty())
+        return false;
+
+    const int d = (int)ctx->model.hparams.d_model;
+    const int first = (int)(l->ctx_left / l->samples_per_frame);
+    const int avail = std::min(T_enc, geom.valid) - first;
+    const int n_decode = is_last ? avail : std::min((int)(l->ctx_chunk / l->samples_per_frame), avail);
+    if (n_decode > 0)
+        parakeet_rnnt_stream_decode(ctx, l->decoder, enc.data() + (size_t)first * d, n_decode, d);
+
+    l->next_read += num_new;
+    l->initialized = true;
+    return true;
+}
+
+extern "C" struct parakeet_live* parakeet_live_begin(struct parakeet_context* ctx, int left_ms, int chunk_ms,
+                                                     int right_ms) {
+    if (!ctx || !ctx->model.hparams.stt_format || ctx->model.hparams.n_tdt_durations != 0)
+        return nullptr;
+    const auto& hp = ctx->model.hparams;
+    const int samples_per_frame = (int)(hp.subsampling_factor * hp.hop_length);
+    const int frame_ms = samples_per_frame * 1000 / (int)hp.sample_rate;
+    if (left_ms < 0 || chunk_ms < 0 || right_ms < 0 || left_ms % frame_ms || chunk_ms % frame_ms || right_ms % frame_ms)
+        return nullptr;
+    auto* l = new parakeet_live();
+    l->ctx = ctx;
+    l->samples_per_frame = samples_per_frame;
+    l->left_frames = left_ms ? left_ms / frame_ms : 70;
+    l->chunk_frames = chunk_ms ? chunk_ms / frame_ms : 13;
+    l->right_frames = right_ms ? right_ms / frame_ms : 13;
+    l->samples_left = (int64_t)l->left_frames * samples_per_frame;
+    l->samples_chunk = (int64_t)l->chunk_frames * samples_per_frame;
+    l->samples_right = (int64_t)l->right_frames * samples_per_frame;
+    parakeet_rnnt_stream_init(ctx, l->decoder);
+    return l;
+}
+
+extern "C" int parakeet_live_feed(struct parakeet_live* l, const float* samples, int n_samples) {
+    if (!l || !samples || n_samples < 0)
+        return -1;
+    l->pcm.insert(l->pcm.end(), samples, samples + n_samples);
+    while (true) {
+        const int64_t num_new = l->initialized ? l->samples_chunk : l->samples_chunk + l->samples_right;
+        if (l->next_read + num_new > (int64_t)l->pcm.size())
+            return 0;
+        if (!parakeet_live_emit(l, num_new, false, 0))
+            return -2;
+    }
+}
+
+extern "C" struct parakeet_result* parakeet_live_finish(struct parakeet_live* l) {
+    if (!l)
+        return nullptr;
+    const int64_t total = (int64_t)l->pcm.size();
+    if ((l->next_read < total || l->ctx_right > 0) &&
+        !parakeet_live_emit(l, total - l->next_read, true, l->samples_right))
+        return nullptr;
+    const int fed_frames = (int)(total / l->samples_per_frame);
+    for (auto& e : l->decoder.emitted) {
+        e.t_start = std::min(e.t_start, fed_frames);
+        e.t_end = std::min(e.t_end, fed_frames);
+    }
+    return parakeet_build_result(l->ctx, l->decoder.emitted, 0);
+}
+
+extern "C" void parakeet_live_free(struct parakeet_live* l) {
+    delete l;
 }
 
 extern "C" char* parakeet_transcribe(struct parakeet_context* ctx, const float* samples, int n_samples) {

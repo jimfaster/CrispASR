@@ -1333,6 +1333,22 @@ CA_EXPORT void crispasr_parakeet_free(parakeet_context* ctx) {
         parakeet_free(ctx);
 }
 
+CA_EXPORT parakeet_live* crispasr_parakeet_live_begin(parakeet_context* ctx, int left_ms, int chunk_ms, int right_ms) {
+    return parakeet_live_begin(ctx, left_ms, chunk_ms, right_ms);
+}
+
+CA_EXPORT int crispasr_parakeet_live_feed(parakeet_live* live, const float* pcm, int n_samples) {
+    return parakeet_live_feed(live, pcm, n_samples);
+}
+
+CA_EXPORT parakeet_result* crispasr_parakeet_live_finish(parakeet_live* live) {
+    return parakeet_live_finish(live);
+}
+
+CA_EXPORT void crispasr_parakeet_live_free(parakeet_live* live) {
+    parakeet_live_free(live);
+}
+
 CA_EXPORT parakeet_result* crispasr_parakeet_transcribe(parakeet_context* ctx, const float* pcm, int n_samples,
                                                         int64_t t_offset_cs) {
     if (!ctx || !pcm || n_samples <= 0)
