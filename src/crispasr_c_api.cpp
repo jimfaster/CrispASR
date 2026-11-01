@@ -1341,6 +1341,10 @@ CA_EXPORT int crispasr_parakeet_live_feed(parakeet_live* live, const float* pcm,
     return parakeet_live_feed(live, pcm, n_samples);
 }
 
+CA_EXPORT parakeet_result* crispasr_parakeet_live_partial(parakeet_live* live) {
+    return parakeet_live_partial(live);
+}
+
 CA_EXPORT parakeet_result* crispasr_parakeet_live_finish(parakeet_live* live) {
     return parakeet_live_finish(live);
 }

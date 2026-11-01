@@ -103,6 +103,8 @@ struct parakeet_result* parakeet_transcribe_streamed(struct parakeet_context* ct
 struct parakeet_live;
 struct parakeet_live* parakeet_live_begin(struct parakeet_context* ctx, int left_ms, int chunk_ms, int right_ms);
 int parakeet_live_feed(struct parakeet_live* live, const float* samples, int n_samples);
+// The words so far, or NULL when nothing new was written since the last call.
+struct parakeet_result* parakeet_live_partial(struct parakeet_live* live);
 struct parakeet_result* parakeet_live_finish(struct parakeet_live* live);
 void parakeet_live_free(struct parakeet_live* live);
 

@@ -4331,6 +4331,7 @@ struct parakeet_live {
     int64_t ctx_left = 0, ctx_chunk = 0, ctx_right = 0;
     bool initialized = false;
     parakeet_rnnt_stream decoder;
+    size_t partial_tokens = 0;
 };
 
 static bool parakeet_live_emit(parakeet_live* l, int64_t num_new, bool is_last, int64_t eos_pad) {
@@ -4417,6 +4418,13 @@ extern "C" int parakeet_live_feed(struct parakeet_live* l, const float* samples,
         if (!parakeet_live_emit(l, num_new, false, 0))
             return -2;
     }
+}
+
+extern "C" struct parakeet_result* parakeet_live_partial(struct parakeet_live* l) {
+    if (!l || l->decoder.emitted.size() == l->partial_tokens)
+        return nullptr;
+    l->partial_tokens = l->decoder.emitted.size();
+    return parakeet_build_result(l->ctx, l->decoder.emitted, 0);
 }
 
 extern "C" struct parakeet_result* parakeet_live_finish(struct parakeet_live* l) {
