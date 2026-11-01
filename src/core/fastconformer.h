@@ -977,7 +977,9 @@ static inline ggml_tensor* build_block(ggml_context* ctx0, ggml_tensor* cur, ggm
 
     // dw conv (kernel K, padding K/2). BN was folded into conv_dw_w/b at load.
     // Use pre-cast F32 weights if available (avoids F16→F32 cast per forward).
-    ggml_tensor* dw_w_f32 = e.conv_dw_w_f32 ? e.conv_dw_w_f32 : ggml_cast(ctx0, e.conv_dw_w, GGML_TYPE_F32);
+    ggml_tensor* dw_w_f32 = e.conv_dw_w_f32 ? e.conv_dw_w_f32
+                            : e.conv_dw_w->type == GGML_TYPE_F32 ? e.conv_dw_w
+                                                                 : ggml_cast(ctx0, e.conv_dw_w, GGML_TYPE_F32);
     ggml_tensor* dw_w_4d = ggml_reshape_4d(ctx0, dw_w_f32, K, 1, 1, d);
     cnv = ggml_cont(ctx0, ggml_transpose(ctx0, cnv)); // (d, T) → (T, d)
     cnv = ggml_reshape_4d(ctx0, cnv, T, 1, d, 1);
