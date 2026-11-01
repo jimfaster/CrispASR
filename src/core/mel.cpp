@@ -224,6 +224,20 @@ std::vector<float> compute(const float* samples, int n_samples, const float* win
     // -----------------------------------------------------------------
     std::vector<float> mel_tn((size_t)T * nmels, 0.0f);
 
+    // Each filter is nonzero over a short range of bins, about 514 values of
+    // the 32,896 in a 257x128 table. The skipped weights are exact zeros.
+    std::vector<int> fb_lo(nmels, n_freqs), fb_hi(nmels, 0);
+    for (int m = 0; m < nmels; m++) {
+        for (int k = 0; k < n_freqs; k++) {
+            const float w =
+                p.fb_layout == FbLayout::MelsFreqs ? mel_fb[(size_t)m * n_freqs + k] : mel_fb[(size_t)k * nmels + m];
+            if (w != 0.0f) {
+                fb_lo[m] = std::min(fb_lo[m], k);
+                fb_hi[m] = k + 1;
+            }
+        }
+    }
+
     auto do_matmul = [&](auto acc_zero) {
         using Acc = decltype(acc_zero);
         for (int t = 0; t < T; t++) {
@@ -233,11 +247,11 @@ std::vector<float> compute(const float* samples, int n_samples, const float* win
                 Acc s = 0;
                 if (p.fb_layout == FbLayout::MelsFreqs) {
                     const float* fb = mel_fb + (size_t)m * n_freqs;
-                    for (int k = 0; k < n_freqs; k++) {
+                    for (int k = fb_lo[m]; k < fb_hi[m]; k++) {
                         s += static_cast<Acc>(pp[k]) * static_cast<Acc>(fb[k]);
                     }
                 } else {
-                    for (int k = 0; k < n_freqs; k++) {
+                    for (int k = fb_lo[m]; k < fb_hi[m]; k++) {
                         s += static_cast<Acc>(pp[k]) * static_cast<Acc>(mel_fb[(size_t)k * nmels + m]);
                     }
                 }

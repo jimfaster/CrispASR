@@ -86,6 +86,14 @@ static inline bool fc_gpu_manual_attn(ggml_backend_t backend) {
     return name && (name[0] == 'C' || name[0] == 'c') && (name[1] == 'U' || name[1] == 'u');
 }
 
+// GGML's Vulkan backend has no fused NORM_AFFINE kernel. Spelling it as
+// NORM + MUL + ADD keeps every encoder step on the card instead of splitting
+// the graph into one card-to-processor round trip per layer norm.
+static inline bool fc_backend_is_vulkan(ggml_backend_t backend) {
+    const char* name = backend ? ggml_backend_name(backend) : nullptr;
+    return name && (name[0] == 'V' || name[0] == 'v') && (name[1] == 'u' || name[1] == 'U');
+}
+
 // ---------------------------------------------------------------------------
 // Rel-pos "shift" trick from Transformer-XL / Conformer: rewrites the raw
 // (Q @ R^T) matrix — which is indexed by (rel_pos, query_pos) with rel_pos
@@ -231,12 +239,20 @@ static inline void snap_conv4d(ggml_context* ctx0, ggml_cgraph* gf, ggml_tensor*
 static inline ggml_tensor* build_pre_encode(ggml_context* ctx0, ggml_tensor* mel, const PreEncodeWeights& w,
                                             int subsampling_channels, int* out_T_enc, ggml_cgraph* gf = nullptr,
                                             ggml_tensor* stage_mask_t0 = nullptr,
-                                            ggml_tensor* stage_mask_t1 = nullptr) {
+                                            ggml_tensor* stage_mask_t1 = nullptr, bool direct = false) {
     auto bias_4d = [&](ggml_tensor* b) {
         return ggml_cast(ctx0, ggml_reshape_4d(ctx0, b, 1, 1, b->ne[0], 1), GGML_TYPE_F32);
     };
+    // Direct kernels skip the im2col expansion of the activations.
+    auto conv_dw = [&](ggml_tensor* k, ggml_tensor* x) {
+        if (!direct)
+            return ggml_conv_2d_dw(ctx0, k, x, 2, 2, 1, 1, 1, 1);
+        ggml_tensor* kernel = k->type == GGML_TYPE_F32 ? k : ggml_cast(ctx0, k, GGML_TYPE_F32);
+        return ggml_conv_2d_dw_direct(ctx0, kernel, x, 2, 2, 1, 1, 1, 1);
+    };
 
-    ggml_tensor* cur = ggml_conv_2d(ctx0, w.conv0_w, mel, 2, 2, 1, 1, 1, 1);
+    ggml_tensor* cur = direct ? ggml_conv_2d_direct(ctx0, w.conv0_w, mel, 2, 2, 1, 1, 1, 1)
+                              : ggml_conv_2d(ctx0, w.conv0_w, mel, 2, 2, 1, 1, 1, 1);
     cur = ggml_add(ctx0, cur, bias_4d(w.conv0_b));
     if (gf)
         snap_conv4d(ctx0, gf, cur, "pre_enc_c0");
@@ -244,7 +260,7 @@ static inline ggml_tensor* build_pre_encode(ggml_context* ctx0, ggml_tensor* mel
     if (stage_mask_t0) // zero pad frames before the next k=3 conv (see header note)
         cur = ggml_mul(ctx0, cur, stage_mask_t0);
 
-    cur = ggml_conv_2d_dw(ctx0, w.conv2_w, cur, 2, 2, 1, 1, 1, 1);
+    cur = conv_dw(w.conv2_w, cur);
     cur = ggml_add(ctx0, cur, bias_4d(w.conv2_b));
     if (gf)
         snap_conv4d(ctx0, gf, cur, "pre_enc_c2");
@@ -256,7 +272,7 @@ static inline ggml_tensor* build_pre_encode(ggml_context* ctx0, ggml_tensor* mel
     if (stage_mask_t1) // zero pad frames before the next k=3 conv
         cur = ggml_mul(ctx0, cur, stage_mask_t1);
 
-    cur = ggml_conv_2d_dw(ctx0, w.conv5_w, cur, 2, 2, 1, 1, 1, 1);
+    cur = conv_dw(w.conv5_w, cur);
     cur = ggml_add(ctx0, cur, bias_4d(w.conv5_b));
     if (gf)
         snap_conv4d(ctx0, gf, cur, "pre_enc_c5");
@@ -564,6 +580,9 @@ struct BlockParams {
     // flash_attn_ext (set from fc_gpu_manual_attn — CUDA rejects the
     // per-head rel-pos mask and would bounce every flash node to CPU).
     bool manual_attn = false;
+
+    // Spell the layer norm as NORM + MUL + ADD (set from fc_backend_is_vulkan).
+    bool split_norm = false;
 };
 
 // TRUE windowed (block sliding-chunks) attention for rel_pos_local_attn models:
@@ -806,11 +825,16 @@ static inline ggml_tensor* build_block(ggml_context* ctx0, ggml_tensor* cur, ggm
         ggml_tensor* y = ggml_mul_mat(ctx0, w, x);
         return b ? ggml_add(ctx0, y, b) : y;
     };
+    auto layer_norm = [&](ggml_tensor* in, ggml_tensor* w, ggml_tensor* b) {
+        if (!p.split_norm)
+            return ggml_norm_affine(ctx0, in, w, b, eps);
+        return ggml_add(ctx0, ggml_mul(ctx0, ggml_norm(ctx0, in, eps), w), b);
+    };
 
     ggml_tensor* inpL = cur;
 
     // ---- FFN1 (macaron half) ----
-    ggml_tensor* x = ggml_norm_affine(ctx0, cur, e.norm_ff1_w, e.norm_ff1_b, eps);
+    ggml_tensor* x = layer_norm(cur, e.norm_ff1_w, e.norm_ff1_b);
     x = mm_bias(e.ff1_l1_w, x, e.ff1_l1_b);
     x = ggml_silu(ctx0, x);
     x = mm_bias(e.ff1_l2_w, x, e.ff1_l2_b);
@@ -819,7 +843,7 @@ static inline ggml_tensor* build_block(ggml_context* ctx0, ggml_tensor* cur, ggm
     ggml_tensor* inpAttn = cur;
 
     // ---- Self-Attention (rel_pos with untied biases) ----
-    x = ggml_norm_affine(ctx0, cur, e.norm_attn_w, e.norm_attn_b, eps);
+    x = layer_norm(cur, e.norm_attn_w, e.norm_attn_b);
 
     // Q/K/V projections — fused single matmul + view-split when the load-time
     // concat is available (bit-identical: each output row is the same dot
@@ -941,7 +965,7 @@ static inline ggml_tensor* build_block(ggml_context* ctx0, ggml_tensor* cur, ggm
 
     // ---- Conformer convolution module ----
     ggml_tensor* inpConv = cur;
-    x = ggml_norm_affine(ctx0, cur, e.norm_conv_w, e.norm_conv_b, eps);
+    x = layer_norm(cur, e.norm_conv_w, e.norm_conv_b);
 
     // pw1: (d → 2d), then sigmoid GLU — fused into one op, avoids strided-view
     // CUDA fallback that plagued the manual sigmoid path (see issue #81 PR #05).
@@ -963,7 +987,7 @@ static inline ggml_tensor* build_block(ggml_context* ctx0, ggml_tensor* cur, ggm
 
     cnv = ggml_add(ctx0, cnv, ggml_reshape_2d(ctx0, e.conv_dw_b, d, 1));
     if (e.conv_ln_w) // conv_norm_type=layer_norm: LN over channels per frame
-        cnv = ggml_norm_affine(ctx0, cnv, e.conv_ln_w, e.conv_ln_b, eps);
+        cnv = layer_norm(cnv, e.conv_ln_w, e.conv_ln_b);
     cnv = ggml_silu(ctx0, cnv);
 
     // pw2: (d → d)
@@ -973,14 +997,14 @@ static inline ggml_tensor* build_block(ggml_context* ctx0, ggml_tensor* cur, ggm
 
     // ---- FFN2 (macaron half) ----
     ggml_tensor* inpFF2 = cur;
-    x = ggml_norm_affine(ctx0, cur, e.norm_ff2_w, e.norm_ff2_b, eps);
+    x = layer_norm(cur, e.norm_ff2_w, e.norm_ff2_b);
     x = mm_bias(e.ff2_l1_w, x, e.ff2_l1_b);
     x = ggml_silu(ctx0, x);
     x = mm_bias(e.ff2_l2_w, x, e.ff2_l2_b);
     cur = ggml_add(ctx0, inpFF2, ggml_scale(ctx0, x, 0.5f));
 
     // ---- Block final LN ----
-    cur = ggml_norm_affine(ctx0, cur, e.norm_out_w, e.norm_out_b, eps);
+    cur = layer_norm(cur, e.norm_out_w, e.norm_out_b);
 
     // Re-zero pad columns at the block boundary (bucketed path): pad garbage
     // otherwise grows across blocks until 0-weight × huge-value artifacts

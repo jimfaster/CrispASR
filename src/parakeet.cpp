@@ -245,6 +245,14 @@ struct parakeet_context {
     parakeet_predictor_weights pred_w;
     parakeet_joint_weights joint_w;
 
+    // Decode graphs run on their own processor backend and thread pool, over
+    // plain-float tensors that alias the host weight caches above.
+    ggml_backend_t decode_backend = nullptr;
+    ggml_threadpool_t decode_pool = nullptr;
+    ggml_context* decode_ctx = nullptr;
+    parakeet_predictor decode_pred;
+    parakeet_joint decode_joint;
+
     int n_threads = 4;
     parakeet_abort_callback abort_callback = nullptr;
     void* abort_callback_user_data = nullptr;
@@ -855,7 +863,10 @@ static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_me
 
     // ----- Pre-encode (dw_striding subsampling 8×) -----
     int T = 0;
-    ggml_tensor* cur = core_conformer::build_pre_encode(ctx0, mel, m.pre_encode, (int)hp.subsampling_channels, &T);
+    const bool direct_pre_encode =
+        core_conformer::fc_backend_is_vulkan(ctx->backend) || ggml_backend_is_cpu(ctx->backend);
+    ggml_tensor* cur = core_conformer::build_pre_encode(ctx0, mel, m.pre_encode, (int)hp.subsampling_channels, &T,
+                                                        nullptr, nullptr, nullptr, direct_pre_encode);
 
     // ----- xscaling: NeMo's RelPositionalEncoding multiplies the encoder
     // input by sqrt(d_model) before the conformer layers when the model's
@@ -903,6 +914,7 @@ static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_me
         kLayerNormEps,   hp.att_context_left, hp.att_context_right, (int)hp.global_tokens,
     };
     bp.manual_attn = core_conformer::fc_gpu_manual_attn(ctx->backend);
+    bp.split_norm = core_conformer::fc_backend_is_vulkan(ctx->backend);
     for (uint32_t il = 0; il < hp.n_layers; il++) {
         cur = core_conformer::build_block(ctx0, cur, pos_enc, T, m.enc[il], bp, local_mask, nullptr, window_band_mask);
     }
@@ -1386,28 +1398,66 @@ struct parakeet_emitted_token {
     float p;     // softmax probability of the emitted token [0, 1]
 };
 
-// §232 — GPU decode via the shared core_rnnt_ggml helpers (predictor LSTM +
-// joint as ggml graphs on ctx->backend). Default ON when the decode backend is a
-// GPU (P100 A/B: 5-12x faster, transcript-identical — LEARNINGS 33); cblas on
-// CPU. Override PARAKEET_GGML_DECODE=1/0; RNNT_GGML_PERSTEP = per-step path.
-//
+static void parakeet_init_decode_backend(parakeet_context* ctx) {
+    if (ctx->decode_backend)
+        return;
+    parakeet_init_pred_weights(ctx);
+    parakeet_init_joint_weights(ctx);
+
+    int threads = ctx->n_threads;
+    if (const char* e = crispasr_env::get("CRISPASR_PARAKEET_DECODE_THREADS"))
+        threads = std::max(1, atoi(e));
+    ctx->decode_backend = ggml_backend_cpu_init();
+    ggml_threadpool_params pool_params = ggml_threadpool_params_default(threads);
+    ctx->decode_pool = ggml_threadpool_new(&pool_params);
+    ggml_backend_cpu_set_threadpool(ctx->decode_backend, ctx->decode_pool);
+    ggml_backend_cpu_set_n_threads(ctx->decode_backend, threads);
+
+    ctx->decode_ctx = ggml_init({ggml_tensor_overhead() * 16, nullptr, true});
+    auto wrap = [&](ggml_tensor* like, std::vector<float>& host) {
+        ggml_tensor* t = ggml_new_tensor(ctx->decode_ctx, GGML_TYPE_F32, ggml_n_dims(like), like->ne);
+        t->data = host.data();
+        return t;
+    };
+    const auto& p = ctx->model.predictor;
+    const auto& j = ctx->model.joint;
+    auto& W = ctx->pred_w;
+    auto& J = ctx->joint_w;
+    auto& dp = ctx->decode_pred;
+    auto& dj = ctx->decode_joint;
+    dp.embed_w = wrap(p.embed_w, W.embed);
+    dp.lstm0_w_ih = wrap(p.lstm0_w_ih, W.w_ih_0);
+    dp.lstm0_b_ih = wrap(p.lstm0_b_ih, W.b_ih_0);
+    dp.lstm0_w_hh = wrap(p.lstm0_w_hh, W.w_hh_0);
+    dp.lstm0_b_hh = wrap(p.lstm0_b_hh, W.b_hh_0);
+    dp.lstm1_w_ih = wrap(p.lstm1_w_ih, W.w_ih_1);
+    dp.lstm1_b_ih = wrap(p.lstm1_b_ih, W.b_ih_1);
+    dp.lstm1_w_hh = wrap(p.lstm1_w_hh, W.w_hh_1);
+    dp.lstm1_b_hh = wrap(p.lstm1_b_hh, W.b_hh_1);
+    dj.enc_w = wrap(j.enc_w, J.enc_w);
+    dj.pred_w = wrap(j.pred_w, J.pred_w);
+    dj.pred_b = wrap(j.pred_b, J.pred_b);
+    dj.out_w = wrap(j.out_w, J.out_w);
+    dj.out_b = wrap(j.out_b, J.out_b);
+}
+
 // Returns whether to use ggml decode, and builds the persistent `gdec` when so.
 // Shared by every parakeet decode variant (greedy, beam, maes, rnnt).
 static bool parakeet_init_ggml_decoder(parakeet_context* ctx, core_rnnt_ggml::Decoder& gdec) {
-    bool ggml_dec = !ggml_backend_is_cpu(ctx->backend);
-    // ggml decode wins on CUDA/Vulkan (slow CPU BLAS: P100 5-12x) but LOSES on
-    // Metal, where Apple Accelerate cblas beats the small-matmul GPU decode (M1
-    // parakeet total ~16x cblas vs ~11x ggml). Default OFF on Metal (LEARNINGS 34).
+    // The decode graphs run on the processor backend. OFF on Metal, where Apple
+    // Accelerate cblas beats them (M1 parakeet total ~16x cblas vs ~11x ggml, LEARNINGS 34).
+    bool ggml_dec = true;
 #if defined(GGML_USE_METAL)
-    if (ggml_dec && ggml_backend_is_metal(ctx->backend))
+    if (ggml_backend_is_metal(ctx->backend))
         ggml_dec = false;
 #endif
     if (const char* e = crispasr_env::get("CRISPASR_PARAKEET_GGML_DECODE"))
         ggml_dec = (e[0] == '1');
     if (ggml_dec && crispasr_env::get("CRISPASR_RNNT_GGML_PERSTEP") == nullptr) {
-        const auto& p = ctx->model.predictor;
-        const auto& j = ctx->model.joint;
-        core_rnnt_ggml::decoder_init(gdec, ctx->backend, p.embed_w, p.lstm0_w_ih, p.lstm0_b_ih, p.lstm0_w_hh,
+        parakeet_init_decode_backend(ctx);
+        const auto& p = ctx->decode_pred;
+        const auto& j = ctx->decode_joint;
+        core_rnnt_ggml::decoder_init(gdec, ctx->decode_backend, p.embed_w, p.lstm0_w_ih, p.lstm0_b_ih, p.lstm0_w_hh,
                                      p.lstm0_b_hh, p.lstm1_w_ih, p.lstm1_b_ih, p.lstm1_w_hh, p.lstm1_b_hh, j.pred_w,
                                      j.pred_b, j.out_w, j.out_b, (int)ctx->model.hparams.pred_hidden,
                                      (int)ctx->model.hparams.joint_hidden);
@@ -1444,7 +1494,7 @@ static std::vector<parakeet_emitted_token> parakeet_tdt_decode(parakeet_context*
     parakeet_init_pred_weights(ctx);
     parakeet_init_joint_weights(ctx);
 
-    // §232: ggml GPU decode default (see parakeet_init_ggml_decoder / LEARNINGS 33).
+    // §232: ggml decode default (see parakeet_init_ggml_decoder).
     core_rnnt_ggml::Decoder gdec;
     const bool ggml_dec = parakeet_init_ggml_decoder(ctx, gdec);
     const bool time_dec = crispasr_env::get("CRISPASR_PARAKEET_DECODE_TIMING") != nullptr;
@@ -1515,17 +1565,32 @@ static std::vector<parakeet_emitted_token> parakeet_tdt_decode(parakeet_context*
         cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, T_enc, J.joint_hidden, J.d_model, 1.0f, enc, J.d_model,
                     J.enc_w.data(), J.d_model, 1.0f, all_proj_e.data(), J.joint_hidden);
 #else
-        // Per-frame fallback (still better than computing inside the loop
-        // where cache misses on enc[] are random due to dur_skip advances)
-        for (int t = 0; t < T_enc; t++) {
-            float* dst = all_proj_e.data() + (size_t)t * J.joint_hidden;
-            const float* enc_t = enc + (size_t)t * J.d_model;
-            for (int i = 0; i < J.joint_hidden; i++) {
-                float s = dst[i]; // already has enc_b[i]
-                const float* row = J.enc_w.data() + (size_t)i * J.d_model;
-                for (int k = 0; k < J.d_model; k++)
-                    s += row[k] * enc_t[k];
-                dst[i] = s;
+        if (gdec.active()) {
+            std::vector<float> projected(all_proj_e.size());
+            ggml_context* pc = ggml_init({ggml_tensor_overhead() * 4 + ggml_graph_overhead(), nullptr, true});
+            ggml_tensor* in = ggml_new_tensor_2d(pc, GGML_TYPE_F32, J.d_model, T_enc);
+            in->data = const_cast<float*>(enc);
+            ggml_tensor* proj = ggml_mul_mat(pc, ctx->decode_joint.enc_w, in);
+            proj->data = projected.data();
+            ggml_cgraph* pg = ggml_new_graph(pc);
+            ggml_build_forward_expand(pg, proj);
+            ggml_backend_graph_compute(ctx->decode_backend, pg);
+            ggml_free(pc);
+            for (size_t n = 0; n < all_proj_e.size(); n++)
+                all_proj_e[n] += projected[n];
+        } else {
+            // Per-frame fallback (still better than computing inside the loop
+            // where cache misses on enc[] are random due to dur_skip advances)
+            for (int t = 0; t < T_enc; t++) {
+                float* dst = all_proj_e.data() + (size_t)t * J.joint_hidden;
+                const float* enc_t = enc + (size_t)t * J.d_model;
+                for (int i = 0; i < J.joint_hidden; i++) {
+                    float s = dst[i]; // already has enc_b[i]
+                    const float* row = J.enc_w.data() + (size_t)i * J.d_model;
+                    for (int k = 0; k < J.d_model; k++)
+                        s += row[k] * enc_t[k];
+                    dst[i] = s;
+                }
             }
         }
 #endif
@@ -2950,6 +3015,12 @@ extern "C" void parakeet_free(struct parakeet_context* ctx) {
         return;
     if (ctx->sched)
         ggml_backend_sched_free(ctx->sched);
+    if (ctx->decode_pool)
+        ggml_threadpool_free(ctx->decode_pool);
+    if (ctx->decode_backend)
+        ggml_backend_free(ctx->decode_backend);
+    if (ctx->decode_ctx)
+        ggml_free(ctx->decode_ctx);
     ctx->model.pw_q8.free();
     ctx->model.qkv_fused.free();
     if (ctx->model.buf_f32)
