@@ -768,7 +768,7 @@ static std::vector<float> parakeet_compute_mel_impl(parakeet_context* ctx, const
 
     auto mel = core_mel::compute(samples, n_samples, ctx->model.mel_window_host.data(), win,
                                  ctx->model.mel_fb_host.data(), n_freqs, parakeet_fft_r2c, p, T_out);
-    if (hp.stt_format) {
+    if (hp.n_tdt_durations == 0) {
         mel.resize(mel.size() + n_mels, 0.0f);
         T_out += 1;
     }
@@ -4387,7 +4387,7 @@ static bool parakeet_live_emit(parakeet_live* l, int64_t num_new, bool is_last, 
 
 extern "C" struct parakeet_live* parakeet_live_begin(struct parakeet_context* ctx, int left_ms, int chunk_ms,
                                                      int right_ms) {
-    if (!ctx || !ctx->model.hparams.stt_format || ctx->model.hparams.n_tdt_durations != 0)
+    if (!ctx || ctx->model.hparams.n_tdt_durations != 0)
         return nullptr;
     const auto& hp = ctx->model.hparams;
     const int samples_per_frame = (int)(hp.subsampling_factor * hp.hop_length);
