@@ -108,6 +108,9 @@ struct parakeet_result* parakeet_live_partial(struct parakeet_live* live);
 struct parakeet_result* parakeet_live_finish(struct parakeet_live* live);
 void parakeet_live_free(struct parakeet_live* live);
 
+// Language of a multilingual model, a name from the file's dictionary. False when the file does not know it.
+bool parakeet_set_language(struct parakeet_context* ctx, const char* language);
+
 // Vocabulary helpers
 int parakeet_n_vocab(struct parakeet_context* ctx);
 // Issue #257: 1 iff the model's vocab is predominantly Japanese script (JA-only

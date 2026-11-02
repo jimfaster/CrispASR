@@ -157,6 +157,8 @@ struct parakeet_hparams {
 
     // File written by transcribe.cpp's converter: stt.* keys, enc.* tensor names, no stored mel tables.
     bool stt_format = false;
+    // File written by parakeet.cpp's converter: parakeet.encoder.* keys, NeMo tensor names.
+    bool nemo_names = false;
 };
 
 // ===========================================================================
@@ -212,6 +214,12 @@ struct parakeet_model {
     ggml_tensor* ctc_b = nullptr; // (ctc_vocab,)
     bool has_ctc = false;
     uint32_t ctc_vocab_size = 0;
+
+    // Language layer of multilingual files. Empty dictionary = no layer.
+    ggml_tensor *prompt_w0 = nullptr, *prompt_b0 = nullptr;
+    ggml_tensor *prompt_w1 = nullptr, *prompt_b1 = nullptr;
+    std::unordered_map<std::string, int> prompt_ids;
+    int prompt_id = 0;
 
     ggml_context* ctx = nullptr;
     ggml_backend_buffer_t buf = nullptr;
@@ -404,6 +412,41 @@ static bool parakeet_load_model(parakeet_model& model, parakeet_vocab& vocab, co
             hp.n_tdt_durations = core_gguf::kv_u32(gctx, "stt.parakeet.joint.num_extra_outputs", hp.n_tdt_durations);
             hp.tdt_durations.clear();
         }
+        hp.nemo_names = gguf_find_key(gctx, "parakeet.encoder.d_model") >= 0;
+        if (hp.nemo_names) {
+            hp.sample_rate = core_gguf::kv_u32(gctx, "parakeet.preprocessor.sample_rate", hp.sample_rate);
+            hp.n_mels = core_gguf::kv_u32(gctx, "parakeet.preprocessor.n_mels", hp.n_mels);
+            hp.n_fft = core_gguf::kv_u32(gctx, "parakeet.preprocessor.n_fft", hp.n_fft);
+            hp.win_length = core_gguf::kv_u32(gctx, "parakeet.preprocessor.win_length", hp.win_length);
+            hp.hop_length = core_gguf::kv_u32(gctx, "parakeet.preprocessor.hop_length", hp.hop_length);
+            hp.d_model = core_gguf::kv_u32(gctx, "parakeet.encoder.d_model", hp.d_model);
+            hp.n_layers = core_gguf::kv_u32(gctx, "parakeet.encoder.n_layers", hp.n_layers);
+            hp.n_heads = core_gguf::kv_u32(gctx, "parakeet.encoder.n_heads", hp.n_heads);
+            hp.head_dim = hp.d_model / hp.n_heads;
+            hp.ff_dim = core_gguf::kv_u32(gctx, "parakeet.encoder.ff_dim", hp.ff_dim);
+            hp.subsampling_factor =
+                core_gguf::kv_u32(gctx, "parakeet.encoder.subsampling_factor", hp.subsampling_factor);
+            hp.subsampling_channels =
+                core_gguf::kv_u32(gctx, "parakeet.encoder.subsampling_conv_channels", hp.subsampling_channels);
+            hp.conv_kernel = core_gguf::kv_u32(gctx, "parakeet.encoder.conv_kernel", hp.conv_kernel);
+            hp.xscaling = core_gguf::kv_bool(gctx, "parakeet.encoder.xscaling", hp.xscaling);
+            hp.pred_hidden = core_gguf::kv_u32(gctx, "parakeet.decoder.pred_hidden", hp.pred_hidden);
+            hp.pred_layers = core_gguf::kv_u32(gctx, "parakeet.decoder.pred_rnn_layers", hp.pred_layers);
+            hp.joint_hidden = core_gguf::kv_u32(gctx, "parakeet.joint.joint_hidden", hp.joint_hidden);
+            hp.n_tdt_durations = 0;
+            hp.tdt_durations.clear();
+
+            const auto languages = core_gguf::kv_str_array(gctx, "parakeet.prompt.dictionary.keys");
+            const int ids_key = gguf_find_key(gctx, "parakeet.prompt.dictionary.values");
+            if (!languages.empty() && ids_key >= 0 && gguf_get_arr_type(gctx, ids_key) == GGUF_TYPE_INT32) {
+                const auto* ids = (const int32_t*)gguf_get_arr_data(gctx, ids_key);
+                for (size_t i = 0; i < languages.size(); i++)
+                    model.prompt_ids[languages[i]] = ids[i];
+                const auto first = model.prompt_ids.find(core_gguf::kv_str(gctx, "parakeet.prompt.default_lang", ""));
+                if (first != model.prompt_ids.end())
+                    model.prompt_id = first->second;
+            }
+        }
         // Issue #89: NeMo supports switching a full-attention FastConformer to
         // rel_pos_local_attn at inference time (change_attention_model) for
         // long-form audio; the mask math is identical, only the window
@@ -424,7 +467,8 @@ static bool parakeet_load_model(parakeet_model& model, parakeet_vocab& vocab, co
             model.ctc_vocab_size = core_gguf::kv_u32(gctx, "parakeet.ctc_vocab_size", 0);
 
         // Vocab: tokenizer.ggml.tokens is a string array.
-        auto tokens = core_gguf::kv_str_array(gctx, "tokenizer.ggml.tokens");
+        auto tokens =
+            core_gguf::kv_str_array(gctx, hp.nemo_names ? "parakeet.tokenizer.pieces" : "tokenizer.ggml.tokens");
         if (!tokens.empty()) {
             vocab.id_to_token = std::move(tokens);
             for (int i = 0; i < (int)vocab.id_to_token.size(); i++) {
@@ -444,8 +488,8 @@ static bool parakeet_load_model(parakeet_model& model, parakeet_vocab& vocab, co
     model.buf = wl.buf;
     model.tensors = std::move(wl.tensors);
 
-    if (model.hparams.stt_format) {
-        static const std::pair<const char*, const char*> stt_renames[] = {
+    if (model.hparams.stt_format || model.hparams.nemo_names) {
+        static const std::vector<std::pair<const char*, const char*>> stt_renames = {
             {"enc.pre_encode.", "encoder.pre."},   {"enc.blocks.", "encoder.layers."},
             {".attn.linear_q.", ".attn.q."},       {".attn.linear_k.", ".attn.k."},
             {".attn.linear_v.", ".attn.v."},       {".attn.linear_out.", ".attn.out."},
@@ -454,16 +498,44 @@ static bool parakeet_load_model(parakeet_model& model, parakeet_vocab& vocab, co
             {"pred.embed.", "decoder.embed."},     {"pred.lstm.", "decoder.lstm."},
             {".Wx", ".w_ih"},                      {".Wh", ".w_hh"},
         };
+        static const std::vector<std::pair<const char*, const char*>> nemo_renames = {
+            {"preprocessor.featurizer.", "preprocessor."},
+            {"encoder.pre_encode.", "encoder.pre."},
+            {".norm_feed_forward1.", ".norm_ff1."},
+            {".norm_feed_forward2.", ".norm_ff2."},
+            {".feed_forward1.", ".ff1."},
+            {".feed_forward2.", ".ff2."},
+            {".norm_self_att.", ".norm_attn."},
+            {".self_attn.", ".attn."},
+            {".linear_q.", ".q."},
+            {".linear_k.", ".k."},
+            {".linear_v.", ".v."},
+            {".linear_out.", ".out."},
+            {".linear_pos.", ".pos."},
+            {".pointwise_conv1.", ".pw1."},
+            {".pointwise_conv2.", ".pw2."},
+            {".depthwise_conv.", ".dw."},
+            {".batch_norm.", ".bn."},
+            {"decoder.prediction.embed.", "decoder.embed."},
+            {"joint.joint_net.2.", "joint.out."},
+        };
+        static const std::string nemo_lstm = "decoder.prediction.dec_rnn.lstm.";
         std::map<std::string, ggml_tensor*> renamed;
         for (const auto& kv : model.tensors) {
             std::string name = kv.first;
-            for (const auto& r : stt_renames) {
+            for (const auto& r : model.hparams.stt_format ? stt_renames : nemo_renames) {
                 const size_t at = name.find(r.first);
                 if (at != std::string::npos)
                     name.replace(at, strlen(r.first), r.second);
             }
             if (name.rfind("decoder.lstm.", 0) == 0 && name.size() > 5 && name.compare(name.size() - 5, 5, ".bias") == 0)
                 name.replace(name.size() - 5, 5, ".b_ih");
+            if (name.rfind(nemo_lstm, 0) == 0) {
+                // weight_ih_l0 becomes decoder.lstm.0.w_ih
+                const std::string leaf = name.substr(nemo_lstm.size());
+                name = "decoder.lstm." + leaf.substr(leaf.size() - 1) + "." + leaf[0] + "_" +
+                       leaf.substr(leaf.find('_') + 1, 2);
+            }
             renamed[name] = kv.second;
         }
         model.tensors = std::move(renamed);
@@ -625,6 +697,13 @@ static bool parakeet_load_model(parakeet_model& model, parakeet_vocab& vocab, co
     j.pred_b = require(model, "joint.pred.bias");
     j.out_w = require(model, "joint.out.weight");
     j.out_b = require(model, "joint.out.bias");
+
+    if (!model.prompt_ids.empty()) {
+        model.prompt_w0 = require(model, "prompt_kernel.0.weight");
+        model.prompt_b0 = require(model, "prompt_kernel.0.bias");
+        model.prompt_w1 = require(model, "prompt_kernel.2.weight");
+        model.prompt_b1 = require(model, "prompt_kernel.2.bias");
+    }
 
     // CTC head (optional)
     if (model.has_ctc) {
@@ -1014,6 +1093,15 @@ static ggml_cgraph* parakeet_build_graph_encoder(parakeet_context* ctx, int T_me
                                           window_band_mask);
     }
 
+    // ----- Language layer: each frame plus the language one-hot, then Linear, ReLU, Linear -----
+    if (m.prompt_w0) {
+        ggml_tensor* language = ggml_new_tensor_2d(ctx0, GGML_TYPE_F32, m.prompt_w0->ne[0] - (int)hp.d_model, T);
+        ggml_set_name(language, "language");
+        ggml_set_input(language);
+        cur = ggml_add(ctx0, ggml_mul_mat(ctx0, m.prompt_w0, ggml_concat(ctx0, cur, language, 0)), m.prompt_b0);
+        cur = ggml_add(ctx0, ggml_mul_mat(ctx0, m.prompt_w1, ggml_relu(ctx0, cur)), m.prompt_b1);
+    }
+
     ggml_set_name(cur, "enc_out");
     ggml_build_forward_expand(gf, cur);
     ggml_free(ctx0);
@@ -1150,6 +1238,14 @@ static std::vector<float> parakeet_encode_mel(parakeet_context* ctx, const float
                                 attn.size() * sizeof(float));
         ggml_backend_tensor_set(ggml_graph_get_tensor(gf, "live_time_mask"), keep.data(), 0,
                                 keep.size() * sizeof(float));
+    }
+
+    ggml_tensor* language_in = ggml_graph_get_tensor(gf, "language");
+    if (language_in) {
+        std::vector<float> one_hot((size_t)ggml_nelements(language_in), 0.0f);
+        for (int64_t t = 0; t < language_in->ne[1]; t++)
+            one_hot[(size_t)(t * language_in->ne[0] + ctx->model.prompt_id)] = 1.0f;
+        ggml_backend_tensor_set(language_in, one_hot.data(), 0, one_hot.size() * sizeof(float));
     }
 
     // Compute
@@ -4444,6 +4540,16 @@ extern "C" struct parakeet_result* parakeet_live_finish(struct parakeet_live* l)
 
 extern "C" void parakeet_live_free(struct parakeet_live* l) {
     delete l;
+}
+
+extern "C" bool parakeet_set_language(struct parakeet_context* ctx, const char* language) {
+    if (!ctx || !language)
+        return false;
+    const auto it = ctx->model.prompt_ids.find(language);
+    if (it == ctx->model.prompt_ids.end())
+        return false;
+    ctx->model.prompt_id = it->second;
+    return true;
 }
 
 extern "C" char* parakeet_transcribe(struct parakeet_context* ctx, const float* samples, int n_samples) {

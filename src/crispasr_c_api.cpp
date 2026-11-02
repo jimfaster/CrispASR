@@ -1353,6 +1353,10 @@ CA_EXPORT void crispasr_parakeet_live_free(parakeet_live* live) {
     parakeet_live_free(live);
 }
 
+CA_EXPORT int crispasr_parakeet_set_language(parakeet_context* ctx, const char* language) {
+    return parakeet_set_language(ctx, language) ? 1 : 0;
+}
+
 CA_EXPORT parakeet_result* crispasr_parakeet_transcribe(parakeet_context* ctx, const float* pcm, int n_samples,
                                                         int64_t t_offset_cs) {
     if (!ctx || !pcm || n_samples <= 0)
