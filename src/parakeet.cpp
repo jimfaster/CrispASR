@@ -4427,7 +4427,9 @@ struct parakeet_live {
     int64_t ctx_left = 0, ctx_chunk = 0, ctx_right = 0;
     bool initialized = false;
     parakeet_rnnt_stream decoder;
-    size_t partial_tokens = 0;
+    std::vector<float> tail;
+    bool tail_fresh = false;
+    std::vector<int> shown;
 };
 
 static bool parakeet_live_emit(parakeet_live* l, int64_t num_new, bool is_last, int64_t eos_pad) {
@@ -4475,6 +4477,10 @@ static bool parakeet_live_emit(parakeet_live* l, int64_t num_new, bool is_last, 
     const int n_decode = is_last ? avail : std::min((int)(l->ctx_chunk / l->samples_per_frame), avail);
     if (n_decode > 0)
         parakeet_rnnt_stream_decode(ctx, l->decoder, enc.data() + (size_t)first * d, n_decode, d);
+    if (!is_last) {
+        l->tail.assign(enc.begin() + (size_t)(first + n_decode) * d, enc.begin() + (size_t)(first + avail) * d);
+        l->tail_fresh = true;
+    }
 
     l->next_read += num_new;
     l->initialized = true;
@@ -4517,10 +4523,30 @@ extern "C" int parakeet_live_feed(struct parakeet_live* l, const float* samples,
 }
 
 extern "C" struct parakeet_result* parakeet_live_partial(struct parakeet_live* l) {
-    if (!l || l->decoder.emitted.size() == l->partial_tokens)
+    if (!l || !l->tail_fresh)
         return nullptr;
-    l->partial_tokens = l->decoder.emitted.size();
-    return parakeet_build_result(l->ctx, l->decoder.emitted, 0);
+    l->tail_fresh = false;
+    parakeet_rnnt_stream& s = l->decoder;
+    const parakeet_lstm_state state = s.state;
+    const std::vector<float> pred_out = s.pred_out;
+    const core_context_bias::MatchState hw_state = s.hw_state;
+    const size_t n_emitted = s.emitted.size();
+    const int frame_offset = s.frame_offset;
+    const int d = (int)l->ctx->model.hparams.d_model;
+    if (!l->tail.empty())
+        parakeet_rnnt_stream_decode(l->ctx, s, l->tail.data(), (int)(l->tail.size() / d), d);
+    std::vector<int> ids(s.emitted.size());
+    for (size_t i = 0; i < ids.size(); i++)
+        ids[i] = s.emitted[i].id;
+    parakeet_result* r = ids == l->shown ? nullptr : parakeet_build_result(l->ctx, s.emitted, 0);
+    s.state = state;
+    s.pred_out = pred_out;
+    s.hw_state = hw_state;
+    s.emitted.resize(n_emitted);
+    s.frame_offset = frame_offset;
+    if (r)
+        l->shown = std::move(ids);
+    return r;
 }
 
 extern "C" struct parakeet_result* parakeet_live_finish(struct parakeet_live* l) {
